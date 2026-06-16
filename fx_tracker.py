@@ -265,36 +265,45 @@ def fetch_klibor_3m():
 
 def fetch_sofr_3m_compounded():
     """
-    Fetch latest 90-day SOFR Average from official NY Fed API.
-    This is the correct and stable method (no scraping).
+    Fetch latest 90-day Average SOFR from FRED text data.
+    90-day Average SOFR = practical public proxy for 3M compounded O/N SOFR.
     """
 
-    url = "https://markets.newyorkfed.org/api/rates/secured/sofr/averages/last/1.json"
-    
+    url = "https://fred.stlouisfed.org/data/SOFR90DAYAVG"
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
 
-    data = resp.json()
+    lines = resp.text.splitlines()
 
-    try:
-        record = data["refRates"][0]
+    # Find the data section after the header
+    data_lines = []
+    start_collect = False
 
-        # Values from API:
-        # avg30, avg90, avg180
-        avg_90 = record["avg90"]
+    for line in lines:
+        if line.startswith("DATE"):
+            start_collect = True
+            continue
+        if start_collect:
+            data_lines.append(line.strip())
 
-        print(
-            f"SOFR API row: "
-            f"30D={record['avg30']} | "
-            f"90D={record['avg90']} | "
-            f"180D={record['avg180']}"
-        )
+    if not data_lines:
+        raise Exception("Could not find SOFR90DAYAVG data lines.")
 
-        return float(avg_90)
+    # Walk backwards to get latest valid number
+    for line in reversed(data_lines):
+        if not line:
+            continue
 
-    except Exception as e:
-        raise Exception(f"Failed to parse SOFR API response: {e}")
+        parts = line.split()
+        if len(parts) >= 2:
+            date_str = parts[0]
+            value_str = parts[1]
 
+            if value_str != ".":
+                print(f"SOFR 90-day raw line: {date_str} {value_str}")
+                return float(value_str)
+
+    raise Exception("Could not find latest valid SOFR 90-day value.")
 
 def fetch_hibor_3m():
     # HKMA API
