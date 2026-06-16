@@ -329,6 +329,28 @@ def fetch_sofr_3m_compounded():
         # Match a row like:
         # 06/15 3.60136 3.63561 3.67923 1.24721652
         m = re.search(
+            r"(\d{2}/\d{2})\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)",
+            text
+        )
+
+        if not m:
+            raise Exception("Could not find latest SOFR averages row on New York Fed page.")
+
+        row_date = m.group(1)
+        avg_30 = m.group(2)
+        avg_90 = m.group(3)
+        avg_180 = m.group(4)
+        sofr_index = m.group(5)
+
+        print(
+            f"SOFR 90-day raw (NY Fed): {row_date} | "
+            f"30D={avg_30} | 90D={avg_90} | 180D={avg_180} | INDEX={sofr_index}"
+        )
+
+        return float(avg_90)
+
+    except Exception as e:
+        raise Exception(f"Could not fetch 90-day SOFR from FRED or New York Fed. Last error: {e}")
 
 def fetch_hibor_3m():
     # HKMA API
