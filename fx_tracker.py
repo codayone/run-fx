@@ -205,9 +205,10 @@ def fetch_klibor_3m():
     """
     Fetch latest 3M KLIBOR from BNM FMIP page.
 
-    Source page structure shown in BNM FMIP:
+    The visible page layout is:
     Date | 1M | 2M | 3M | 6M | 9M | 12M
-    e.g. 15/06/2026 3.00 - 3.36 3.39 - -
+    Example shown on page:
+    15/06/2026  3.00  -  3.36  3.39  -  -
     """
 
     import re
@@ -220,28 +221,31 @@ def fetch_klibor_3m():
 
     html = resp.text
 
-    # Normalize whitespace so regex can match across HTML/newlines
-    text = re.sub(r"\s+", " ", html)
+    # Remove HTML tags first
+    text = re.sub(r"<[^>]+>", " ", html)
 
-    # Match the first visible data row:
-    # DATE 1M 2M 3M 6M 9M 12M
-    m = re.search(
+    # Decode common HTML spaces and normalize whitespace
+    text = text.replace("&nbsp;", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Find all data rows in the form:
+    # dd/mm/yyyy 1M 2M 3M 6M 9M 12M
+    rows = re.findall(
         r"(\d{2}/\d{2}/\d{4})\s+([0-9.]+|-)\s+([0-9.]+|-)\s+([0-9.]+|-)\s+([0-9.]+|-)\s+([0-9.]+|-)\s+([0-9.]+|-)",
         text
     )
 
-    if not m:
+    if not rows:
         raise Exception("Could not find latest KLIBOR row.")
 
-    row_date = m.group(1)
-    val_1m = m.group(2)
-    val_2m = m.group(3)
-    val_3m = m.group(4)
-    val_6m = m.group(5)
-    val_9m = m.group(6)
-    val_12m = m.group(7)
+    # First row on page is latest date
+    row_date, val_1m, val_2m, val_3m, val_6m, val_9m, val_12m = rows[0]
 
-    print(f"KLIBOR raw row: {row_date} | 1M={val_1m} | 2M={val_2m} | 3M={val_3m} | 6M={val_6m} | 9M={val_9m} | 12M={val_12m}")
+    print(
+        f"KLIBOR raw row: {row_date} | "
+        f"1M={val_1m} | 2M={val_2m} | 3M={val_3m} | "
+        f"6M={val_6m} | 9M={val_9m} | 12M={val_12m}"
+    )
 
     if val_3m == "-":
         raise Exception("Latest 3M KLIBOR is '-' on source page.")
