@@ -412,13 +412,6 @@ def fetch_euribor_3m():
 
 
 def fetch_tibor_3m():
-    """
-    Source requested by user:
-    https://cio.cimb.com/ticker/interest_rates-bondapac-jptibor-03m-198200/snapshots
-
-    IMPORTANT:
-    This is a CIMB market-data page, not the official JBA administrator page.
-    """
     url = "https://cio.cimb.com/ticker/interest_rates-bondapac-jptibor-03m-198200/snapshots"
     html = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30).text
 
