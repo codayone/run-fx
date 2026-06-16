@@ -265,34 +265,28 @@ def fetch_klibor_3m():
 
 def fetch_sofr_3m_compounded():
     """
-    Fetch latest 90-Day Average SOFR from FRED text page.
-    This is the practical public proxy for 3M compounded O/N SOFR.
+    Fetch latest 90D SOFR from FRED CSV endpoint (fast & stable).
     """
 
-    import re
+    import pandas as pd
 
-    url = "https://fred.stlouisfed.org/data/SOFR90DAYAVG"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR90DAYAVG"
 
-    resp = requests.get(url, headers=headers, timeout=30)
-    resp.raise_for_status()
+    df = pd.read_csv(url)
 
-    text = resp.text
+    # Drop missing values
+    df = df.dropna()
 
-    # Match lines like:
-    # 2026-06-15 3.635610000000000000
-    matches = re.findall(r"(\d{4}-\d{2}-\d{2})\s+([0-9.]+|\.)", text)
+    if df.empty:
+        raise Exception("No SOFR data found.")
 
-    if not matches:
-        raise Exception("Could not find SOFR90DAYAVG observations in FRED response.")
+    latest_row = df.iloc[-1]
+    date = latest_row["DATE"]
+    value = latest_row["SOFR90DAYAVG"]
 
-    # Walk backwards to get latest valid numeric value
-    for date_str, value_str in reversed(matches):
-        if value_str != ".":
-            print(f"SOFR 90-day raw line: {date_str} {value_str}")
-            return float(value_str)
+    print(f"SOFR 90-day raw: {date} {value}")
 
-    raise Exception("Could not find latest valid SOFR 90-day value.")
+    return float(value)
 
 def fetch_hibor_3m():
     # HKMA API
