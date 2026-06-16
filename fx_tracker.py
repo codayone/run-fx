@@ -369,11 +369,6 @@ def fetch_fixed_975():
 
 
 def fetch_euribor_3m():
-    """
-    Fetch latest 3M EURIBOR from ECB Data API.
-    Source series key:
-    FM.M.U2.EUR.RT.MM.EURIBOR3MD_.HSTA
-    """
 
     import pandas as pd
     from io import StringIO
@@ -408,8 +403,6 @@ def fetch_euribor_3m():
     print(f"EURIBOR 3M raw: {date} {value}")
 
     return float(value)
-    """
-
 
 def fetch_tibor_3m():
     url = "https://cio.cimb.com/ticker/interest_rates-bondapac-jptibor-03m-198200/snapshots"
