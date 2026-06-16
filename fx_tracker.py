@@ -282,6 +282,95 @@ def fetch_euribor_3m():
 
     raise Exception("Could not fetch 3M EURIBOR from the Bank of Finland page.")
 
+def fetch_tibor_3m():
+    """
+    Source requested by user:
+    https://cio.cimb.com/ticker/interest_rates-bondapac-jptibor-03m-198200/snapshots
+
+    IMPORTANT:
+    This is a CIMB market-data page, not the official JBA administrator page.
+    """
+    url = "https://cio.cimb.com/ticker/interest_rates-bondapac-jptibor-03m-198200/snapshots"
+    html = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30).text
+
+    # Simple regex fallback because pages like this often render a "Last: X.XXXX"
+    import re
+    m = re.search(r"Last:\s*([0-9]+\.[0-9]+)", html, flags=re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+
+    # Fallback to read_html if page exposes tables
+    tables = pd.read_html(StringIO(html))
+    for tbl in tables:
+        for col in tbl.columns:
+            temp = tbl[col].astype(str)
+            hit = temp.str.extract(r"([0-9]+\.[0-9]+)")
+            if hit.notna().any().any():
+                return float(hit.dropna().iloc[0, 0])
+
+    raise Exception("Could not fetch 3M TIBOR from CIMB page.")
+
+def fetch_indonia_3m_compounded():
+    """
+    User requested BI INDONIA page:
+    https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/default.aspx
+
+    Practical note:
+    Bank Indonesia also has a more direct historical page for
+    Compounded INDONIA / INDONIA Index.
+    This function first tries the user's page, then falls back to the direct BI historical page.
+    """
+    candidate_urls = [
+        "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/default.aspx",
+        "https://www.bi.go.id/en/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
+    ]
+
+    import re
+
+    for url in candidate_urls:
+        html = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30).text
+
+        # Try to detect a 90-day / 3M compounded rate in raw text
+        patterns = [
+            r"90\s*day[s]?\D+([0-9]+\.[0-9]+)",
+            r"90\s*calendar\s*day[s]?\D+([0-9]+\.[0-9]+)",
+            r"3\s*month[s]?\D+([0-9]+\.[0-9]+)",
+        ]
+        for p in patterns:
+            m = re.search(p, html, flags=re.IGNORECASE | re.DOTALL)
+            if m:
+                return float(m.group(1))
+
+        # Try HTML tables
+        try:
+            tables = pd.read_html(StringIO(html))
+        except Exception:
+            tables = []
+
+        for tbl in tables:
+            tbl.columns = [str(c).strip() for c in tbl.columns]
+
+            # Case 1: tenor as row values
+            for col in tbl.columns:
+                tenor_mask = tbl[col].astype(str).str.contains(
+                    "90 day|90-day|3 month|3-month|3 months", case=False, na=False
+                )
+                if tenor_mask.any():
+                    for value_col in tbl.columns:
+                        if value_col != col:
+                            vals = pd.to_numeric(tbl.loc[tenor_mask, value_col], errors="coerce").dropna()
+                            if not vals.empty:
+                                return float(vals.iloc[0])
+
+            # Case 2: tenor as column headers
+            for c in tbl.columns:
+                if any(x in c.lower() for x in ["90 day", "90-day", "3 month", "3-month", "3 months"]):
+                    vals = pd.to_numeric(tbl[c], errors="coerce").dropna()
+                    if not vals.empty:
+                        return float(vals.iloc[0])
+
+    raise Exception("Could not fetch 3M compounded INDONIA from Bank Indonesia pages.")
+
 def fetch_benchmark_rates():
     rates = {}
 
@@ -290,15 +379,12 @@ def fetch_benchmark_rates():
     rates["SOFR_3M_COMPOUNDED"] = fetch_sofr_3m_compounded()
     rates["HIBOR_3M"] = fetch_hibor_3m()
     rates["SORA_1M"] = fetch_sora_1m()
+    rates["TIBOR_3M"] = fetch_tibor_3m()
+    rates["EURIBOR_3M"] = fetch_euribor_3m()
+    rates["INDONIA_3M_COMPOUNDED"] = fetch_indonia_3m_compounded()
     rates["FIXED_9_75"] = fetch_fixed_975()
 
-    # manual / restricted
-    rates["INDONIA_3M_COMPOUNDED"] = MANUAL_RATES["INDONIA_3M_COMPOUNDED"]
-    rates["TIBOR_3M"] = MANUAL_RATES["TIBOR_3M"]
-    rates["EURIBOR_3M"] = MANUAL_RATES["EURIBOR_3M"]
-
     return rates
-
 
 # ============================================
 # BUILD LOAN RATE TABLE
