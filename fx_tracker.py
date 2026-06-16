@@ -161,17 +161,68 @@ def get_html_tables(url):
 # FETCHERS
 # ============================================
 def fetch_thor_3m():
-    url = "https://app.bot.or.th/THOR/en"
-    tables = get_html_tables(url)
+    """
+    Fetch 3M THOR Average.
 
-    for tbl in tables:
-        cols = [str(c).strip().lower() for c in tbl.columns]
-        if any("tenor" in c for c in cols) and any("thor average" in c for c in cols):
-            tenor_col = next(c for c in tbl.columns if "tenor" in str(c).lower())
-            rate_col = next(c for c in tbl.columns if "thor average" in str(c).lower())
-            row = tbl[tbl[tenor_col].astype(str).str.contains("3 month", case=False, na=False)]
-            if not row.empty:
-                return float(row.iloc[0][rate_col])
+    Main idea:
+    1) Try direct regex on BOT THOR page
+    2) Fallback to ThaiBMA THOR page
+    """
+
+    import re
+
+    urls = [
+        "https://app.bot.or.th/THOR/en",
+        "https://www.thaibma.or.th/EN/Market/THOR.aspx",
+    ]
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    patterns = [
+        # Match forms like:
+        # 3 Months 92 days 0.99498
+        r"3\s*Months?\s*\d+\s*days?\s*([0-9]+\.[0-9]+)",
+        r"3\s*Month[s]?\s*([0-9]+\.[0-9]+)",
+        r"3\s*Months?.{0,80}?([0-9]+\.[0-9]+)",
+    ]
+
+    for url in urls:
+        html = requests.get(url, headers=headers, timeout=30).text
+
+        # Regex against raw html/text
+        for p in patterns:
+            m = re.search(p, html, flags=re.IGNORECASE | re.DOTALL)
+            if m:
+                return float(m.group(1))
+
+        # Optional fallback: try tables if they exist
+        try:
+            tables = pd.read_html(StringIO(html))
+        except Exception:
+            tables = []
+
+        for tbl in tables:
+            tbl.columns = [str(c).strip() for c in tbl.columns]
+
+            # tenor as row values
+            for col in tbl.columns:
+                tenor_mask = tbl[col].astype(str).str.contains(
+                    r"3\s*month", case=False, na=False
+                )
+                if tenor_mask.any():
+                    for value_col in tbl.columns:
+                        if value_col != col:
+                            vals = pd.to_numeric(tbl.loc[tenor_mask, value_col], errors="coerce").dropna()
+                            if not vals.empty:
+                                return float(vals.iloc[0])
+
+            # tenor as column header
+            for c in tbl.columns:
+                if "3 month" in c.lower():
+                    vals = pd.to_numeric(tbl[c], errors="coerce").dropna()
+                    if not vals.empty:
+                        return float(vals.iloc[0])
+
     raise Exception("Could not fetch 3M THOR Average.")
 
 
