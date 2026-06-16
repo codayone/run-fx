@@ -3,3 +3,4 @@ pandas
 pytz
 lxml
 html5lib
+beautifulsoup4
