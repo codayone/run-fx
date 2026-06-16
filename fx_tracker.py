@@ -265,43 +265,32 @@ def fetch_klibor_3m():
 
 def fetch_sofr_3m_compounded():
     """
-    Fetch latest 90-day Average SOFR from FRED text data.
-    90-day Average SOFR = practical public proxy for 3M compounded O/N SOFR.
+    Fetch latest 90-Day Average SOFR from FRED text page.
+    This is the practical public proxy for 3M compounded O/N SOFR.
     """
 
+    import re
+
     url = "https://fred.stlouisfed.org/data/SOFR90DAYAVG"
-    resp = requests.get(url, timeout=30)
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    resp = requests.get(url, headers=headers, timeout=30)
     resp.raise_for_status()
 
-    lines = resp.text.splitlines()
+    text = resp.text
 
-    # Find the data section after the header
-    data_lines = []
-    start_collect = False
+    # Match lines like:
+    # 2026-06-15 3.635610000000000000
+    matches = re.findall(r"(\d{4}-\d{2}-\d{2})\s+([0-9.]+|\.)", text)
 
-    for line in lines:
-        if line.startswith("DATE"):
-            start_collect = True
-            continue
-        if start_collect:
-            data_lines.append(line.strip())
+    if not matches:
+        raise Exception("Could not find SOFR90DAYAVG observations in FRED response.")
 
-    if not data_lines:
-        raise Exception("Could not find SOFR90DAYAVG data lines.")
-
-    # Walk backwards to get latest valid number
-    for line in reversed(data_lines):
-        if not line:
-            continue
-
-        parts = line.split()
-        if len(parts) >= 2:
-            date_str = parts[0]
-            value_str = parts[1]
-
-            if value_str != ".":
-                print(f"SOFR 90-day raw line: {date_str} {value_str}")
-                return float(value_str)
+    # Walk backwards to get latest valid numeric value
+    for date_str, value_str in reversed(matches):
+        if value_str != ".":
+            print(f"SOFR 90-day raw line: {date_str} {value_str}")
+            return float(value_str)
 
     raise Exception("Could not find latest valid SOFR 90-day value.")
 
