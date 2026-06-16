@@ -126,55 +126,199 @@ for ccy in CURRENCIES:
     print(f"{BASE_CURRENCY} → {ccy}: {current_rates[ccy]}")
 
 
-# =========================
-# 2) BNM OVERNIGHT RATE
-# =========================
-bnm_url = "https://financialmarkets.bnm.gov.my/data-download-bnm-money-market-operations"
+import requests
+import pandas as pd
+from io import StringIO
 
-headers = {
-    "User-Agent": "Mozilla/5.0"
-}
+# ============================================
+# BENCHMARK CONFIG
+# ============================================
+# loan_id can be whatever name you want for each facility/loan
+LOAN_BENCHMARKS = [
+    {"loan_id": "THB_1", "currency": "THB", "benchmark": "3M Compound O/N THOR", "fetch_key": "THOR_3M"},
+    {"loan_id": "MYR_1", "currency": "MYR", "benchmark": "3M KLIBOR", "fetch_key": "KLIBOR_3M"},
+    {"loan_id": "USD_1", "currency": "USD", "benchmark": "3M Compound O/N SOFR", "fetch_key": "SOFR_3M_COMPOUNDED"},
+    {"loan_id": "HKD_1", "currency": "HKD", "benchmark": "3M HIBOR", "fetch_key": "HIBOR_3M"},
+    {"loan_id": "HKD_2", "currency": "HKD", "benchmark": "3M HIBOR", "fetch_key": "HIBOR_3M"},
+    {"loan_id": "HKD_3", "currency": "HKD", "benchmark": "3M HIBOR", "fetch_key": "HIBOR_3M"},
+    {"loan_id": "IDR_1", "currency": "IDR", "benchmark": "3M Compound O/N INDONIA", "fetch_key": "INDONIA_3M_COMPOUNDED"},
+    {"loan_id": "SGD_1", "currency": "SGD", "benchmark": "1M SORA", "fetch_key": "SORA_1M"},
+    {"loan_id": "JPY_1", "currency": "JPY", "benchmark": "3M TIBOR", "fetch_key": "TIBOR_3M"},
+    {"loan_id": "EUR_1", "currency": "EUR", "benchmark": "3M EURIBOR", "fetch_key": "EURIBOR_3M"},
+    {"loan_id": "EUR_2", "currency": "EUR", "benchmark": "Fixed Rate at 9.75%", "fetch_key": "FIXED_9_75"},
+]
 
-req = urllib.request.Request(bnm_url, headers=headers)
-html = urllib.request.urlopen(req).read().decode("utf-8")
 
-tables = pd.read_html(StringIO(html))
+# ============================================
+# HELPER
+# ============================================
+def get_html_tables(url):
+    html = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30).text
+    return pd.read_html(StringIO(html))
 
-target_df = None
 
-for i, tbl in enumerate(tables):
-    temp = tbl.copy()
+# ============================================
+# FETCHERS
+# ============================================
+def fetch_thor_3m():
+    url = "https://app.bot.or.th/THOR/en"
+    tables = get_html_tables(url)
 
-    temp.columns = [
-        " ".join([str(x).strip() for x in col]).replace("\n", " ").strip()
-        if isinstance(col, tuple)
-        else str(col).replace("\n", " ").strip()
-        for col in temp.columns
-    ]
+    for tbl in tables:
+        cols = [str(c).strip().lower() for c in tbl.columns]
+        if any("tenor" in c for c in cols) and any("thor average" in c for c in cols):
+            tenor_col = next(c for c in tbl.columns if "tenor" in str(c).lower())
+            rate_col = next(c for c in tbl.columns if "thor average" in str(c).lower())
+            row = tbl[tbl[tenor_col].astype(str).str.contains("3 month", case=False, na=False)]
+            if not row.empty:
+                return float(row.iloc[0][rate_col])
+    raise Exception("Could not fetch 3M THOR Average.")
 
-    print(f"Checking BNM table {i}: {temp.columns.tolist()}")
 
-    cols_lower = [c.lower() for c in temp.columns]
+def fetch_klibor_3m():
+    url = "https://financialmarkets.bnm.gov.my/data-download-klibor"
+    tables = get_html_tables(url)
 
-    if any("date" in c for c in cols_lower) and any("overnight" in c for c in cols_lower):
-        target_df = temp
-        print(f"✅ Using BNM table {i}")
-        break
+    for tbl in tables:
+        cols = [str(c).strip().lower() for c in tbl.columns]
+        if "date" in cols and "3 m" in cols:
+            tbl["3 M"] = pd.to_numeric(tbl["3 M"], errors="coerce")
+            tbl = tbl.dropna(subset=["3 M"])
+            return float(tbl.iloc[0]["3 M"])
+    raise Exception("Could not fetch 3M KLIBOR.")
 
-if target_df is None:
-    raise Exception("Could not find BNM table containing Date and Overnight columns.")
 
-date_col = next(c for c in target_df.columns if "date" in c.lower())
-overnight_col = next(c for c in target_df.columns if "overnight" in c.lower())
+def fetch_sofr_3m_compounded():
+    # 90-day average SOFR = 3M compounded average proxy
+    url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
+    tables = get_html_tables(url)
 
-target_df[date_col] = pd.to_datetime(target_df[date_col], errors="coerce", dayfirst=True)
-target_df[overnight_col] = pd.to_numeric(target_df[overnight_col], errors="coerce")
+    for tbl in tables:
+        cols = [str(c).strip().lower() for c in tbl.columns]
+        if any("90-day average" in c for c in cols):
+            date_col = tbl.columns[0]
+            avg90_col = next(c for c in tbl.columns if "90-day average" in str(c).lower())
+            tbl[avg90_col] = pd.to_numeric(tbl[avg90_col], errors="coerce")
+            tbl = tbl.dropna(subset=[avg90_col])
+            return float(tbl.iloc[0][avg90_col])
+    raise Exception("Could not fetch 90-day SOFR average.")
 
-target_df = target_df.dropna(subset=[date_col, overnight_col])
-target_df = target_df.sort_values(date_col)
 
-overnight_rate = float(target_df.iloc[-1][overnight_col])
-print("✅ Current Malaysia Overnight Rate:", overnight_rate)
+def fetch_hibor_3m():
+    # HKMA API
+    url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily?segment=hibor.fixing"
+    data = requests.get(url, timeout=30).json()
+
+    # HKMA JSON wrappers can differ slightly, so handle a few common shapes
+    records = None
+    if isinstance(data, dict):
+        if "result" in data and isinstance(data["result"], dict) and "records" in data["result"]:
+            records = data["result"]["records"]
+        elif "records" in data:
+            records = data["records"]
+
+    if not records:
+        raise Exception("Could not parse HKMA HIBOR API response.")
+
+    df = pd.DataFrame(records)
+    df["ir_3m"] = pd.to_numeric(df["ir_3m"], errors="coerce")
+    df = df.dropna(subset=["ir_3m"])
+    return float(df.iloc[0]["ir_3m"])
+
+
+def fetch_sora_1m():
+    url = "https://eservices.mas.gov.sg/statistics/dir/domesticinterestrates.aspx"
+    tables = get_html_tables(url)
+
+    for tbl in tables:
+        cols = [str(c).strip().lower() for c in tbl.columns]
+        if any("1-month compounded sora" in c for c in cols):
+            rate_col = next(c for c in tbl.columns if "1-month compounded sora" in str(c).lower())
+            tbl[rate_col] = pd.to_numeric(tbl[rate_col], errors="coerce")
+            tbl = tbl.dropna(subset=[rate_col])
+            return float(tbl.iloc[0][rate_col])
+    raise Exception("Could not fetch 1M SORA.")
+
+
+def fetch_fixed_975():
+    return 9.75
+
+
+def fetch_euribor_3m():
+    """
+    Source requested by user:
+    https://www.suomenpankki.fi/en/statistics/data-and-charts/interest-rates/charts/korot_kuviot_en/euriborkorot_pv_chrt_en/
+
+    Note:
+    Bank of Finland states Euribor data is published with a 24-hour delay.
+    This function tries to parse tables from the page / related page structure.
+    """
+    url = "https://www.suomenpankki.fi/en/statistics/data-and-charts/interest-rates/charts/korot_kuviot_en/euriborkorot_pv_chrt_en/"
+    tables = get_html_tables(url)
+
+    for tbl in tables:
+        # flatten columns
+        tbl.columns = [str(c).strip() for c in tbl.columns]
+        cols_lower = [c.lower() for c in tbl.columns]
+
+        # Look for a column describing tenor / series and a numeric value column
+        # Because site tables can vary, we search by content too
+        for col in tbl.columns:
+            if tbl[col].astype(str).str.contains("3 month|3-month|3 months", case=False, na=False).any():
+                # Find first numeric-looking column other than the matching text col
+                candidate_cols = [c for c in tbl.columns if c != col]
+                for c in candidate_cols:
+                    temp = pd.to_numeric(tbl[c], errors="coerce")
+                    row_idx = tbl[col].astype(str).str.contains("3 month|3-month|3 months", case=False, na=False)
+                    if temp[row_idx].notna().any():
+                        return float(temp[row_idx].dropna().iloc[0])
+
+        # If the table already has a '3-month' style column, use first valid row
+        for c in tbl.columns:
+            if "3 month" in c.lower() or "3-month" in c.lower() or "3 months" in c.lower():
+                temp = pd.to_numeric(tbl[c], errors="coerce").dropna()
+                if not temp.empty:
+                    return float(temp.iloc[0])
+
+    raise Exception("Could not fetch 3M EURIBOR from the Bank of Finland page.")
+
+def fetch_benchmark_rates():
+    rates = {}
+
+    rates["THOR_3M"] = fetch_thor_3m()
+    rates["KLIBOR_3M"] = fetch_klibor_3m()
+    rates["SOFR_3M_COMPOUNDED"] = fetch_sofr_3m_compounded()
+    rates["HIBOR_3M"] = fetch_hibor_3m()
+    rates["SORA_1M"] = fetch_sora_1m()
+    rates["FIXED_9_75"] = fetch_fixed_975()
+
+    # manual / restricted
+    rates["INDONIA_3M_COMPOUNDED"] = MANUAL_RATES["INDONIA_3M_COMPOUNDED"]
+    rates["TIBOR_3M"] = MANUAL_RATES["TIBOR_3M"]
+    rates["EURIBOR_3M"] = MANUAL_RATES["EURIBOR_3M"]
+
+    return rates
+
+
+# ============================================
+# BUILD LOAN RATE TABLE
+# ============================================
+benchmark_rates = fetch_benchmark_rates()
+
+loan_rows = []
+for item in LOAN_BENCHMARKS:
+    rate_value = benchmark_rates.get(item["fetch_key"])
+    loan_rows.append({
+        "Loan_ID": item["loan_id"],
+        "Currency": item["currency"],
+        "Loan_Benchmark_Rate": item["benchmark"],
+        "Benchmark_Value": rate_value
+    })
+
+loan_df = pd.DataFrame(loan_rows)
+
+print("=== Loan Benchmark Rates ===")
+print(loan_df)
 
 
 # =========================
