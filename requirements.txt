@@ -1,0 +1,5 @@
+requests
+pandas
+pytz
+lxml
+html5lib
