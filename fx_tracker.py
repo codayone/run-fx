@@ -426,28 +426,32 @@ def fetch_tibor_3m():
     raise Exception("Could not fetch 3M TIBOR from CIMB page.")
 
 def fetch_indonia_3m_compounded():
-    candidate_urls = [
-        "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/default.aspx",
+    # Official BI sources that mention / publish Compounded INDONIA
+    urls = [
         "https://www.bi.go.id/en/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
+        "https://www.bi.go.id/id/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
+        "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx",
     ]
 
     import re
+    from io import StringIO
 
-    for url in candidate_urls:
-        html = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30).text
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "close",
+    }
 
-        # Try to detect a 90-day / 3M compounded rate in raw text
-        patterns = [
-            r"90\s*day[s]?\D+([0-9]+\.[0-9]+)",
-            r"90\s*calendar\s*day[s]?\D+([0-9]+\.[0-9]+)",
-            r"3\s*month[s]?\D+([0-9]+\.[0-9]+)",
-        ]
-        for p in patterns:
-            m = re.search(p, html, flags=re.IGNORECASE | re.DOTALL)
-            if m:
-                return float(m.group(1))
+    for url in urls:
+        try:
+            resp = requests.get(url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            html = resp.text
+        except Exception as e:
+            print(f"INDONIA source failed: {url} | {e}")
+            continue
 
-        # Try HTML tables
+        # 1) Try HTML tables first
         try:
             tables = pd.read_html(StringIO(html))
         except Exception:
@@ -456,26 +460,52 @@ def fetch_indonia_3m_compounded():
         for tbl in tables:
             tbl.columns = [str(c).strip() for c in tbl.columns]
 
-            # Case 1: tenor as row values
+            # Case A: tenor appears in row values
             for col in tbl.columns:
-                tenor_mask = tbl[col].astype(str).str.contains(
-                    "90 day|90-day|3 month|3-month|3 months", case=False, na=False
+                mask = tbl[col].astype(str).str.contains(
+                    r"90\s*(day|days|hari)|3\s*month|3\s*months|3\s*bulan",
+                    case=False,
+                    na=False,
+                    regex=True,
                 )
-                if tenor_mask.any():
+                if mask.any():
                     for value_col in tbl.columns:
                         if value_col != col:
-                            vals = pd.to_numeric(tbl.loc[tenor_mask, value_col], errors="coerce").dropna()
+                            vals = pd.to_numeric(tbl.loc[mask, value_col], errors="coerce").dropna()
                             if not vals.empty:
-                                return float(vals.iloc[0])
+                                value = float(vals.iloc[0])
+                                print(f"INDONIA 90D table raw ({url}): {value}")
+                                return value
 
-            # Case 2: tenor as column headers
+            # Case B: tenor appears in column names
             for c in tbl.columns:
-                if any(x in c.lower() for x in ["90 day", "90-day", "3 month", "3-month", "3 months"]):
+                if re.search(r"90\s*(day|days|hari)|3\s*month|3\s*months|3\s*bulan", c, flags=re.IGNORECASE):
                     vals = pd.to_numeric(tbl[c], errors="coerce").dropna()
                     if not vals.empty:
-                        return float(vals.iloc[0])
+                        value = float(vals.iloc[0])
+                        print(f"INDONIA 90D column raw ({url}): {value}")
+                        return value
 
-    raise Exception("Could not fetch 3M compounded INDONIA from Bank Indonesia pages.")
+        # 2) Fallback: parse raw page text
+        text = re.sub(r"<[^>]+>", " ", html)
+        text = text.replace("&nbsp;", " ")
+        text = re.sub(r"\s+", " ", text).strip()
+
+        # Look for "90 day(s)" / "90 hari" / "3 month(s)" / "3 bulan"
+        patterns = [
+            r"90\s*(?:day|days|hari)\D{0,40}([0-9]+\.[0-9]+)",
+            r"3\s*(?:month|months|bulan)\D{0,40}([0-9]+\.[0-9]+)",
+        ]
+
+        for p in patterns:
+            m = re.search(p, text, flags=re.IGNORECASE)
+            if m:
+                value = float(m.group(1))
+                print(f"INDONIA 90D text raw ({url}): {value}")
+                return value
+
+    raise Exception("Could not fetch 3M / 90-day Compounded INDONIA from official BI pages.")
+
 
 def fetch_benchmark_rates():
     rates = {}
