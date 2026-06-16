@@ -265,35 +265,70 @@ def fetch_klibor_3m():
 
 def fetch_sofr_3m_compounded():
     """
-    Fetch latest 90D SOFR from FRED CSV (robust column handling).
+    Fetch latest 90-day Average SOFR.
+    Primary source: FRED CSV website
+    Fallback source: New York Fed SOFR Averages webpage
     """
 
+    import re
     import pandas as pd
+    from io import StringIO
 
-    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR90DAYAVG"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "close",
+    }
 
-    df = pd.read_csv(url)
+    # -----------------------------
+    # 1) Primary source: FRED CSV
+    # -----------------------------
+    fred_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR90DAYAVG"
 
-    # Normalize column names
-    df.columns = [col.strip().upper() for col in df.columns]
+    try:
+        resp = requests.get(fred_url, headers=headers, timeout=30)
+        resp.raise_for_status()
 
-    if "SOFR90DAYAVG" not in df.columns:
-        raise Exception(f"SOFR column not found. Columns found: {df.columns.tolist()}")
+        df = pd.read_csv(StringIO(resp.text))
+        df.columns = [col.strip().upper() for col in df.columns]
 
-    df = df.dropna(subset=["SOFR90DAYAVG"])
+        if "SOFR90DAYAVG" not in df.columns:
+            raise Exception(f"SOFR column not found. Columns: {df.columns.tolist()}")
 
-    if df.empty:
-        raise Exception("No valid SOFR data.")
+        df = df.dropna(subset=["SOFR90DAYAVG"])
 
-    latest_row = df.iloc[-1]
+        if df.empty:
+            raise Exception("No valid SOFR data in FRED CSV.")
 
-    date_col = df.columns[0]   # first column is the date column
-    date = latest_row[date_col]
-    value = latest_row["SOFR90DAYAVG"]
+        latest_row = df.iloc[-1]
+        date_col = df.columns[0]
+        date = latest_row[date_col]
+        value = latest_row["SOFR90DAYAVG"]
 
-    print(f"SOFR 90-day raw: {date} {value}")
+        print(f"SOFR 90-day raw (FRED): {date} {value}")
+        return float(value)
 
-    return float(value)
+    except Exception as e:
+        print(f"SOFR FRED source failed: {e}")
+
+    # --------------------------------------
+    # 2) Fallback source: New York Fed page
+    # --------------------------------------
+    nyfed_url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
+
+    try:
+        resp = requests.get(nyfed_url, headers=headers, timeout=30)
+        resp.raise_for_status()
+
+        html = resp.text
+
+        text = re.sub(r"<[^>]+>", " ", html)
+        text = text.replace("&nbsp;", " ")
+        text = re.sub(r"\s+", " ", text).strip()
+
+        # Match a row like:
+        # 06/15 3.60136 3.63561 3.67923 1.24721652
+        m = re.search(
 
 def fetch_hibor_3m():
     # HKMA API
