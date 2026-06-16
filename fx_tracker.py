@@ -263,6 +263,60 @@ def fetch_klibor_3m():
 
     return float(val_3m)
 
+def fetch_sofr_3m_compounded():
+    """
+    Fetch latest 90D SOFR from FRED CSV (robust column handling).
+    """
+
+    import pandas as pd
+
+    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR90DAYAVG"
+
+    df = pd.read_csv(url)
+
+    # Normalize column names
+    df.columns = [col.strip().upper() for col in df.columns]
+
+    if "SOFR90DAYAVG" not in df.columns:
+        raise Exception(f"SOFR column not found. Columns found: {df.columns.tolist()}")
+
+    df = df.dropna(subset=["SOFR90DAYAVG"])
+
+    if df.empty:
+        raise Exception("No valid SOFR data.")
+
+    latest_row = df.iloc[-1]
+
+    date_col = df.columns[0]   # first column is the date column
+    date = latest_row[date_col]
+    value = latest_row["SOFR90DAYAVG"]
+
+    print(f"SOFR 90-day raw: {date} {value}")
+
+    return float(value)
+
+def fetch_hibor_3m():
+    # HKMA API
+    url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily?segment=hibor.fixing"
+    data = requests.get(url, timeout=30).json()
+
+    # HKMA JSON wrappers can differ slightly, so handle a few common shapes
+    records = None
+    if isinstance(data, dict):
+        if "result" in data and isinstance(data["result"], dict) and "records" in data["result"]:
+            records = data["result"]["records"]
+        elif "records" in data:
+            records = data["records"]
+
+    if not records:
+        raise Exception("Could not parse HKMA HIBOR API response.")
+
+    df = pd.DataFrame(records)
+    df["ir_3m"] = pd.to_numeric(df["ir_3m"], errors="coerce")
+    df = df.dropna(subset=["ir_3m"])
+    return float(df.iloc[0]["ir_3m"])
+
+
 def fetch_sora_1m():
     """
     Fetch latest 1M Compounded SORA from a public page that displays
@@ -307,41 +361,6 @@ def fetch_sora_1m():
         print(f"SORA 1M row raw: {value}")
         return value
 
-    raise Exception("Could not fetch 1M SORA.")
-
-def fetch_hibor_3m():
-    # HKMA API
-    url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily?segment=hibor.fixing"
-    data = requests.get(url, timeout=30).json()
-
-    # HKMA JSON wrappers can differ slightly, so handle a few common shapes
-    records = None
-    if isinstance(data, dict):
-        if "result" in data and isinstance(data["result"], dict) and "records" in data["result"]:
-            records = data["result"]["records"]
-        elif "records" in data:
-            records = data["records"]
-
-    if not records:
-        raise Exception("Could not parse HKMA HIBOR API response.")
-
-    df = pd.DataFrame(records)
-    df["ir_3m"] = pd.to_numeric(df["ir_3m"], errors="coerce")
-    df = df.dropna(subset=["ir_3m"])
-    return float(df.iloc[0]["ir_3m"])
-
-
-def fetch_sora_1m():
-    url = "https://eservices.mas.gov.sg/statistics/dir/domesticinterestrates.aspx"
-    tables = get_html_tables(url)
-
-    for tbl in tables:
-        cols = [str(c).strip().lower() for c in tbl.columns]
-        if any("1-month compounded sora" in c for c in cols):
-            rate_col = next(c for c in tbl.columns if "1-month compounded sora" in str(c).lower())
-            tbl[rate_col] = pd.to_numeric(tbl[rate_col], errors="coerce")
-            tbl = tbl.dropna(subset=[rate_col])
-            return float(tbl.iloc[0][rate_col])
     raise Exception("Could not fetch 1M SORA.")
 
 
