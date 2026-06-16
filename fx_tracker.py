@@ -162,69 +162,45 @@ def get_html_tables(url):
 # ============================================
 def fetch_thor_3m():
     """
-    Fetch 3M THOR Average.
-
-    Main idea:
-    1) Try direct regex on BOT THOR page
-    2) Fallback to ThaiBMA THOR page
+    Fetch latest 3M THOR Average from BOT CSV download endpoint.
+    Source:
+    https://app.bot.or.th/BTWS_STAT/statistics/DownloadFile.aspx?file=FM_RT_013_ENG_ALL.CSV
     """
-
     import re
 
-    urls = [
-        "https://app.bot.or.th/THOR/en",
-        "https://www.thaibma.or.th/EN/Market/THOR.aspx",
-    ]
-
+    url = "https://app.bot.or.th/BTWS_STAT/statistics/DownloadFile.aspx?file=FM_RT_013_ENG_ALL.CSV"
     headers = {"User-Agent": "Mozilla/5.0"}
 
-    patterns = [
-        # Match forms like:
-        # 3 Months 92 days 0.99498
-        r"3\s*Months?\s*\d+\s*days?\s*([0-9]+\.[0-9]+)",
-        r"3\s*Month[s]?\s*([0-9]+\.[0-9]+)",
-        r"3\s*Months?.{0,80}?([0-9]+\.[0-9]+)",
-    ]
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
 
-    for url in urls:
-        html = requests.get(url, headers=headers, timeout=30).text
+    text = resp.text
 
-        # Regex against raw html/text
-        for p in patterns:
-            m = re.search(p, html, flags=re.IGNORECASE | re.DOTALL)
-            if m:
-                return float(m.group(1))
+    # Read raw CSV without assuming structure
+    df = pd.read_csv(StringIO(text), header=None)
 
-        # Optional fallback: try tables if they exist
-        try:
-            tables = pd.read_html(StringIO(html))
-        except Exception:
-            tables = []
+    # Find the row that contains "3 Months"
+    mask = df.apply(
+        lambda row: row.astype(str).str.contains(r"\b3 Months\b", case=False, na=False, regex=True).any(),
+        axis=1
+    )
 
-        for tbl in tables:
-            tbl.columns = [str(c).strip() for c in tbl.columns]
+    if not mask.any():
+        raise Exception("Could not find '3 Months' row in THOR CSV.")
 
-            # tenor as row values
-            for col in tbl.columns:
-                tenor_mask = tbl[col].astype(str).str.contains(
-                    r"3\s*month", case=False, na=False
-                )
-                if tenor_mask.any():
-                    for value_col in tbl.columns:
-                        if value_col != col:
-                            vals = pd.to_numeric(tbl.loc[tenor_mask, value_col], errors="coerce").dropna()
-                            if not vals.empty:
-                                return float(vals.iloc[0])
+    row = df[mask].iloc[0].astype(str)
 
-            # tenor as column header
-            for c in tbl.columns:
-                if "3 month" in c.lower():
-                    vals = pd.to_numeric(tbl[c], errors="coerce").dropna()
-                    if not vals.empty:
-                        return float(vals.iloc[0])
+    # Extract all decimal numbers in that row, then take the last one
+    # because the CSV is historical and the latest value is at the end.
+    nums = []
+    for cell in row:
+        matches = re.findall(r"([0-9]+\.[0-9]+)", cell)
+        nums.extend(matches)
 
-    raise Exception("Could not fetch 3M THOR Average.")
+    if not nums:
+        raise Exception("Could not extract numeric THOR values from '3 Months' row.")
 
+    return float(nums[-1])
 
 def fetch_klibor_3m():
     url = "https://financialmarkets.bnm.gov.my/data-download-klibor"
