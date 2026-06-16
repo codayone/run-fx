@@ -2,7 +2,7 @@ name: FX Tracker
 
 on:
   schedule:
-    - cron: "0 1 * * *"   # Runs daily (UTC)
+    - cron: "0 15 * * *"   # Runs daily (UTC)
   workflow_dispatch:      # Allow manual run
 
 jobs:
