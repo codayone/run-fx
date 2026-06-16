@@ -368,38 +368,46 @@ def fetch_fixed_975():
     return 9.75
 
 
-def fetch_euribor_3m():
-    """
-    Fetch latest 3M EURIBOR using ECB data-style CSV proxy (stable).
+def fetch_euribor_3m():def fetch_euribor_ Fetch latest 3M EURIBOR from ECB Data API.
+    Source series key:
+    FM.M.U2.EUR.RT.MM.EURIBOR3MD_.HSTA
     """
 
     import pandas as pd
+    from io import StringIO
 
-    # This dataset contains Euribor time series
-    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=EURIBOR3MD156N"
+    url = (
+        "https://data-api.ecb.europa.eu/service/data/"
+        "FM/M.U2.EUR.RT.MM.EURIBOR3MD_.HSTA"
+        "?lastNObservations=1&detail=dataonly&format=csvdata"
+    )
 
-    df = pd.read_csv(url)
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
 
-    # Normalize column names
+    df = pd.read_csv(StringIO(resp.text))
+
+    # Normalize columns
     df.columns = [col.strip().upper() for col in df.columns]
 
-    if "EURIBOR3MD156N" not in df.columns:
-        raise Exception(f"EURIBOR column not found. Columns: {df.columns.tolist()}")
+    if "OBS_VALUE" not in df.columns:
+        raise Exception(f"ECB EURIBOR response missing OBS_VALUE. Columns: {df.columns.tolist()}")
 
-    df = df.dropna(subset=["EURIBOR3MD156N"])
+    df = df.dropna(subset=["OBS_VALUE"])
 
     if df.empty:
-        raise Exception("No valid EURIBOR data.")
+        raise Exception("No valid EURIBOR data returned by ECB API.")
 
     latest_row = df.iloc[-1]
 
-    date_col = df.columns[0]
-    date = latest_row[date_col]
-    value = latest_row["EURIBOR3MD156N"]
+    date = latest_row["TIME_PERIOD"] if "TIME_PERIOD" in df.columns else "N/A"
+    value = latest_row["OBS_VALUE"]
 
     print(f"EURIBOR 3M raw: {date} {value}")
 
     return float(value)
+    """
+
 
 def fetch_tibor_3m():
     """
