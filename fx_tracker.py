@@ -14,7 +14,11 @@ print("Script started ✅")
 # CONFIG - ONLY EDIT HERE
 # =========================
 BASE_CURRENCY = "USD"
-CURRENCIES = ["SGD", "MYR"]   # <- Add more here, e.g. ["SGD", "MYR", "EUR", "JPY"]
+CURRENCIES = list(set([
+    x["currency"]
+    for x in LOAN_BENCHMARKS
+    if not (x["currency"] == "EUR" and "Fixed" in x["benchmark"])
+]))
 FX_ALERT_THRESHOLD = 0.005    # 0.5%
 
 EMAIL_TO = "tangsuancoco.tan@dayonedc.com"
@@ -121,6 +125,7 @@ data = response.json()
 print("API response:", data)
 
 current_rates = data["rates"]
+current_rates[BASE_CURRENCY] = 1.0
 
 for ccy in CURRENCIES:
     print(f"{BASE_CURRENCY} → {ccy}: {current_rates[ccy]}")
