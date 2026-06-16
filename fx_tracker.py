@@ -265,47 +265,35 @@ def fetch_klibor_3m():
 
 def fetch_sofr_3m_compounded():
     """
-    Fetch latest 90-day SOFR Average from New York Fed page.
-    90-day SOFR Average = practical public proxy for 3M compounded O/N SOFR.
+    Fetch latest 90-day SOFR Average from official NY Fed API.
+    This is the correct and stable method (no scraping).
     """
 
-    import re
-
-    url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
-    headers = {"User-Agent": "Mozilla/5.0"}
-
-    resp = requests.get(url, headers=headers, timeout=30)
+    url = "https://markets.newyorkfed.org/api/rates/secured/sofr/averages/last/1.json"
+    
+    resp = requests.get(url, timeout=30)
     resp.raise_for_status()
 
-    html = resp.text
+    data = resp.json()
 
-    # Remove HTML tags
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = text.replace("&nbsp;", " ")
-    text = re.sub(r"\s+", " ", text).strip()
+    try:
+        record = data["refRates"][0]
 
-    # Look for a row like:
-    # 06/15 3.60136 3.63561 3.67923 1.24721652
-    m = re.search(
-        r"(\d{2}/\d{2})\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)",
-        text
-    )
+        # Values from API:
+        # avg30, avg90, avg180
+        avg_90 = record["avg90"]
 
-    if not m:
-        raise Exception("Could not find latest SOFR averages row.")
+        print(
+            f"SOFR API row: "
+            f"30D={record['avg30']} | "
+            f"90D={record['avg90']} | "
+            f"180D={record['avg180']}"
+        )
 
-    row_date = m.group(1)
-    avg_30 = m.group(2)
-    avg_90 = m.group(3)
-    avg_180 = m.group(4)
-    sofr_index = m.group(5)
+        return float(avg_90)
 
-    print(
-        f"SOFR raw row: {row_date} | "
-        f"30D={avg_30} | 90D={avg_90} | 180D={avg_180} | INDEX={sofr_index}"
-    )
-
-    return float(avg_90)
+    except Exception as e:
+        raise Exception(f"Failed to parse SOFR API response: {e}")
 
 
 def fetch_hibor_3m():
