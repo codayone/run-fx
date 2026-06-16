@@ -265,7 +265,7 @@ def fetch_klibor_3m():
 
 def fetch_sofr_3m_compounded():
     """
-    Fetch latest 90D SOFR from FRED CSV endpoint (fast & stable).
+    Fetch latest 90D SOFR from FRED CSV (robust column handling).
     """
 
     import pandas as pd
@@ -274,20 +274,29 @@ def fetch_sofr_3m_compounded():
 
     df = pd.read_csv(url)
 
+    # Normalize column names (VERY IMPORTANT)
+    df.columns = [col.strip().upper() for col in df.columns]
+
+    # Now columns will be like: DATE, SOFR90DAYAVG
+    if "SOFR90DAYAVG" not in df.columns:
+        raise Exception(f"SOFR column not found. Columns found: {df.columns}")
+
     # Drop missing values
-    df = df.dropna()
+    df = df.dropna(subset=["SOFR90DAYAVG"])
 
     if df.empty:
-        raise Exception("No SOFR data found.")
+        raise Exception("No valid SOFR data.")
 
     latest_row = df.iloc[-1]
-    date = latest_row["DATE"]
+
+    # safer access without assuming column is exactly DATE
+    date_col = df.columns[0]   # first column is date
+    date = latest_row[date_col]
     value = latest_row["SOFR90DAYAVG"]
 
     print(f"SOFR 90-day raw: {date} {value}")
 
     return float(value)
-
 def fetch_hibor_3m():
     # HKMA API
     url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily?segment=hibor.fixing"
