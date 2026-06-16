@@ -166,6 +166,7 @@ def fetch_thor_3m():
     Source:
     https://app.bot.or.th/BTWS_STAT/statistics/DownloadFile.aspx?file=FM_RT_013_ENG_ALL.CSV
     """
+
     import re
 
     url = "https://app.bot.or.th/BTWS_STAT/statistics/DownloadFile.aspx?file=FM_RT_013_ENG_ALL.CSV"
@@ -176,30 +177,28 @@ def fetch_thor_3m():
 
     text = resp.text
 
-    # Read raw CSV without assuming structure
-    df = pd.read_csv(StringIO(text), header=None)
+    # Read raw lines instead of pandas.read_csv
+    lines = text.splitlines()
 
-    # Find the row that contains "3 Months"
-    mask = df.apply(
-        lambda row: row.astype(str).str.contains(r"\b3 Months\b", case=False, na=False, regex=True).any(),
-        axis=1
-    )
+    # Find the line that contains "3 Months"
+    target_line = None
+    for line in lines:
+        if "3 Months" in line:
+            target_line = line
+            break
 
-    if not mask.any():
+    if target_line is None:
         raise Exception("Could not find '3 Months' row in THOR CSV.")
 
-    row = df[mask].iloc[0].astype(str)
+    print("THOR 3M raw line found:", target_line[:200])  # debug only
 
-    # Extract all decimal numbers in that row, then take the last one
-    # because the CSV is historical and the latest value is at the end.
-    nums = []
-    for cell in row:
-        matches = re.findall(r"([0-9]+\.[0-9]+)", cell)
-        nums.extend(matches)
+    # Extract decimal numbers from the row
+    nums = re.findall(r"([0-9]+\.[0-9]+)", target_line)
 
     if not nums:
-        raise Exception("Could not extract numeric THOR values from '3 Months' row.")
+        raise Exception("Could not extract numeric values from THOR 3M row.")
 
+    # Latest value should be the last numeric item in the row
     return float(nums[-1])
 
 def fetch_klibor_3m():
