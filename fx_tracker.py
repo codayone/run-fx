@@ -157,9 +157,16 @@ from io import StringIO
 # HELPER
 # ============================================
 def get_html_tables(url):
-    html = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30).text
-    return pd.read_html(StringIO(html))
+    html = requests.get(
+        url,
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=30
+    ).text
 
+    try:
+        return pd.read_html(StringIO(html))
+    except ValueError:
+        return []
 
 # ============================================
 # FETCHERS
@@ -257,19 +264,48 @@ def fetch_klibor_3m():
     return float(val_3m)
 
 def fetch_sofr_3m_compounded():
-    # 90-day average SOFR = 3M compounded average proxy
-    url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
-    tables = get_html_tables(url)
+    """
+    Fetch latest 90-day SOFR Average from New York Fed page.
+    90-day SOFR Average = practical public proxy for 3M compounded O/N SOFR.
+    """
 
-    for tbl in tables:
-        cols = [str(c).strip().lower() for c in tbl.columns]
-        if any("90-day average" in c for c in cols):
-            date_col = tbl.columns[0]
-            avg90_col = next(c for c in tbl.columns if "90-day average" in str(c).lower())
-            tbl[avg90_col] = pd.to_numeric(tbl[avg90_col], errors="coerce")
-            tbl = tbl.dropna(subset=[avg90_col])
-            return float(tbl.iloc[0][avg90_col])
-    raise Exception("Could not fetch 90-day SOFR average.")
+    import re
+
+    url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+
+    html = resp.text
+
+    # Remove HTML tags
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = text.replace("&nbsp;", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Look for a row like:
+    # 06/15 3.60136 3.63561 3.67923 1.24721652
+    m = re.search(
+        r"(\d{2}/\d{2})\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)",
+        text
+    )
+
+    if not m:
+        raise Exception("Could not find latest SOFR averages row.")
+
+    row_date = m.group(1)
+    avg_30 = m.group(2)
+    avg_90 = m.group(3)
+    avg_180 = m.group(4)
+    sofr_index = m.group(5)
+
+    print(
+        f"SOFR raw row: {row_date} | "
+        f"30D={avg_30} | 90D={avg_90} | 180D={avg_180} | INDEX={sofr_index}"
+    )
+
+    return float(avg_90)
 
 
 def fetch_hibor_3m():
