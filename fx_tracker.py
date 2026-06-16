@@ -368,7 +368,9 @@ def fetch_fixed_975():
     return 9.75
 
 
-def fetch_euribor_3m():def fetch_euribor_ Fetch latest 3M EURIBOR from ECB Data API.
+def fetch_euribor_3m():
+    """
+    Fetch latest 3M EURIBOR from ECB Data API.
     Source series key:
     FM.M.U2.EUR.RT.MM.EURIBOR3MD_.HSTA
     """
