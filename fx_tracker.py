@@ -202,17 +202,51 @@ def fetch_thor_3m():
     return float(nums[-1])
 
 def fetch_klibor_3m():
+    """
+    Fetch latest 3M KLIBOR from BNM FMIP page.
+
+    Source page structure shown in BNM FMIP:
+    Date | 1M | 2M | 3M | 6M | 9M | 12M
+    e.g. 15/06/2026 3.00 - 3.36 3.39 - -
+    """
+
+    import re
+
     url = "https://financialmarkets.bnm.gov.my/data-download-klibor"
-    tables = get_html_tables(url)
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    for tbl in tables:
-        cols = [str(c).strip().lower() for c in tbl.columns]
-        if "date" in cols and "3 m" in cols:
-            tbl["3 M"] = pd.to_numeric(tbl["3 M"], errors="coerce")
-            tbl = tbl.dropna(subset=["3 M"])
-            return float(tbl.iloc[0]["3 M"])
-    raise Exception("Could not fetch 3M KLIBOR.")
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
 
+    html = resp.text
+
+    # Normalize whitespace so regex can match across HTML/newlines
+    text = re.sub(r"\s+", " ", html)
+
+    # Match the first visible data row:
+    # DATE 1M 2M 3M 6M 9M 12M
+    m = re.search(
+        r"(\d{2}/\d{2}/\d{4})\s+([0-9.]+|-)\s+([0-9.]+|-)\s+([0-9.]+|-)\s+([0-9.]+|-)\s+([0-9.]+|-)\s+([0-9.]+|-)",
+        text
+    )
+
+    if not m:
+        raise Exception("Could not find latest KLIBOR row.")
+
+    row_date = m.group(1)
+    val_1m = m.group(2)
+    val_2m = m.group(3)
+    val_3m = m.group(4)
+    val_6m = m.group(5)
+    val_9m = m.group(6)
+    val_12m = m.group(7)
+
+    print(f"KLIBOR raw row: {row_date} | 1M={val_1m} | 2M={val_2m} | 3M={val_3m} | 6M={val_6m} | 9M={val_9m} | 12M={val_12m}")
+
+    if val_3m == "-":
+        raise Exception("Latest 3M KLIBOR is '-' on source page.")
+
+    return float(val_3m)
 
 def fetch_sofr_3m_compounded():
     # 90-day average SOFR = 3M compounded average proxy
