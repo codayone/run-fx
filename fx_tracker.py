@@ -370,41 +370,36 @@ def fetch_fixed_975():
 
 def fetch_euribor_3m():
     """
-    Source requested by user:
-    https://www.suomenpankki.fi/en/statistics/data-and-charts/interest-rates/charts/korot_kuviot_en/euriborkorot_pv_chrt_en/
-
-    Note:
-    Bank of Finland states Euribor data is published with a 24-hour delay.
-    This function tries to parse tables from the page / related page structure.
+    Fetch latest 3M EURIBOR using ECB data-style CSV proxy (stable).
     """
-    url = "https://www.suomenpankki.fi/en/statistics/data-and-charts/interest-rates/charts/korot_kuviot_en/euriborkorot_pv_chrt_en/"
-    tables = get_html_tables(url)
 
-    for tbl in tables:
-        # flatten columns
-        tbl.columns = [str(c).strip() for c in tbl.columns]
-        cols_lower = [c.lower() for c in tbl.columns]
+    import pandas as pd
 
-        # Look for a column describing tenor / series and a numeric value column
-        # Because site tables can vary, we search by content too
-        for col in tbl.columns:
-            if tbl[col].astype(str).str.contains("3 month|3-month|3 months", case=False, na=False).any():
-                # Find first numeric-looking column other than the matching text col
-                candidate_cols = [c for c in tbl.columns if c != col]
-                for c in candidate_cols:
-                    temp = pd.to_numeric(tbl[c], errors="coerce")
-                    row_idx = tbl[col].astype(str).str.contains("3 month|3-month|3 months", case=False, na=False)
-                    if temp[row_idx].notna().any():
-                        return float(temp[row_idx].dropna().iloc[0])
+    # This dataset contains Euribor time series
+    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=EURIBOR3MD156N"
 
-        # If the table already has a '3-month' style column, use first valid row
-        for c in tbl.columns:
-            if "3 month" in c.lower() or "3-month" in c.lower() or "3 months" in c.lower():
-                temp = pd.to_numeric(tbl[c], errors="coerce").dropna()
-                if not temp.empty:
-                    return float(temp.iloc[0])
+    df = pd.read_csv(url)
 
-    raise Exception("Could not fetch 3M EURIBOR from the Bank of Finland page.")
+    # Normalize column names
+    df.columns = [col.strip().upper() for col in df.columns]
+
+    if "EURIBOR3MD156N" not in df.columns:
+        raise Exception(f"EURIBOR column not found. Columns: {df.columns.tolist()}")
+
+    df = df.dropna(subset=["EURIBOR3MD156N"])
+
+    if df.empty:
+        raise Exception("No valid EURIBOR data.")
+
+    latest_row = df.iloc[-1]
+
+    date_col = df.columns[0]
+    date = latest_row[date_col]
+    value = latest_row["EURIBOR3MD156N"]
+
+    print(f"EURIBOR 3M raw: {date} {value}")
+
+    return float(value)
 
 def fetch_tibor_3m():
     """
