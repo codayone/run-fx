@@ -263,40 +263,52 @@ def fetch_klibor_3m():
 
     return float(val_3m)
 
-def fetch_sofr_3m_compounded():
+def fetch_sora_1m():
     """
-    Fetch latest 90D SOFR from FRED CSV (robust column handling).
+    Fetch latest 1M Compounded SORA from a public page that displays
+    MAS-sourced daily domestic interest rates in a simple text layout.
     """
 
-    import pandas as pd
+    import re
 
-    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR90DAYAVG"
+    url = "https://straitsdata.com/finance/mas"
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    df = pd.read_csv(url)
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
 
-    # Normalize column names (VERY IMPORTANT)
-    df.columns = [col.strip().upper() for col in df.columns]
+    html = resp.text
 
-    # Now columns will be like: DATE, SOFR90DAYAVG
-    if "SOFR90DAYAVG" not in df.columns:
-        raise Exception(f"SOFR column not found. Columns found: {df.columns}")
+    # Strip HTML tags and normalize spaces
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = text.replace("&nbsp;", " ")
+    text = re.sub(r"\s+", " ", text).strip()
 
-    # Drop missing values
-    df = df.dropna(subset=["SOFR90DAYAVG"])
+    # Try the summary block first:
+    # "1M Compounded SORA 0.0059% 1.0386% 1-month compounded"
+    m = re.search(
+        r"1M Compounded SORA\s+[+-]?[0-9.]+%\s+([0-9.]+)%",
+        text,
+        flags=re.IGNORECASE
+    )
+    if m:
+        value = float(m.group(1))
+        print(f"SORA 1M summary raw: {value}")
+        return value
 
-    if df.empty:
-        raise Exception("No valid SOFR data.")
+    # Fallback: first visible daily row in the historical block:
+    # "Sun, 14 Jun 2026 1.0038% -16.5 bp 1.0386% 1.0864% 1.0910% ..."
+    m = re.search(
+        r"[A-Z][a-z]{2},\s+\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4}\s+[0-9.]+%\s+[+-]?[0-9.]+\s+bp\s+([0-9.]+)%",
+        text
+    )
+    if m:
+        value = float(m.group(1))
+        print(f"SORA 1M row raw: {value}")
+        return value
 
-    latest_row = df.iloc[-1]
+    raise Exception("Could not fetch 1M SORA.")
 
-    # safer access without assuming column is exactly DATE
-    date_col = df.columns[0]   # first column is date
-    date = latest_row[date_col]
-    value = latest_row["SOFR90DAYAVG"]
-
-    print(f"SOFR 90-day raw: {date} {value}")
-
-    return float(value)
 def fetch_hibor_3m():
     # HKMA API
     url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily?segment=hibor.fixing"
