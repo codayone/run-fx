@@ -433,15 +433,6 @@ def fetch_tibor_3m():
     raise Exception("Could not fetch 3M TIBOR from CIMB page.")
 
 def fetch_indonia_3m_compounded():
-    """
-    User requested BI INDONIA page:
-    https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/default.aspx
-
-    Practical note:
-    Bank Indonesia also has a more direct historical page for
-    Compounded INDONIA / INDONIA Index.
-    This function first tries the user's page, then falls back to the direct BI historical page.
-    """
     candidate_urls = [
         "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/default.aspx",
         "https://www.bi.go.id/en/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
