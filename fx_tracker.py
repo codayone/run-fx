@@ -266,91 +266,68 @@ def fetch_klibor_3m():
 def fetch_sofr_3m_compounded():
     """
     Fetch latest 90-day Average SOFR.
-    Primary source: FRED CSV website
-    Fallback source: New York Fed SOFR Averages webpage
+    Primary: FRED CSV
+    Fallback: New York Fed page
     """
 
     import re
+    import requests
     import pandas as pd
     from io import StringIO
 
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Connection": "close",
     }
 
-    # -----------------------------
-    # 1) Primary source: FRED CSV
-    # -----------------------------
-    fred_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR90DAYAVG"
+    session = requests.Session()
+    session.headers.update(headers)
 
+    # ---------- FRED (1 try only) ----------
     try:
-        resp = requests.get(fred_url, headers=headers, timeout=30)
+        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR90DAYAVG"
+        resp = session.get(url, timeout=15)
         resp.raise_for_status()
 
         df = pd.read_csv(StringIO(resp.text))
-        df.columns = [col.strip().upper() for col in df.columns]
 
-        if "SOFR90DAYAVG" not in df.columns:
-            raise Exception(f"SOFR column not found. Columns: {df.columns.tolist()}")
+        # find value column
+        value_col = [c for c in df.columns if str(c).upper() != "OBSERVATION_DATE"][0]
 
-        df = df.dropna(subset=["SOFR90DAYAVG"])
+        df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+        df = df.dropna()
 
-        if df.empty:
-            raise Exception("No valid SOFR data in FRED CSV.")
+        value = float(df.iloc[-1][value_col])
 
-        latest_row = df.iloc[-1]
-        date_col = df.columns[0]
-        date = latest_row[date_col]
-        value = latest_row["SOFR90DAYAVG"]
-
-        print(f"SOFR 90-day raw (FRED): {date} {value}")
-        return float(value)
+        print(f"✅ SOFR from FRED: {value}")
+        return value
 
     except Exception as e:
-        print(f"SOFR FRED source failed: {e}")
-
-    # --------------------------------------
-    # 2) Fallback source: New York Fed page
-    # --------------------------------------
-    nyfed_url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
+        print(f"⚠️ FRED failed: {e}")
 
     try:
-        resp = requests.get(nyfed_url, headers=headers, timeout=30)
+        url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
+        resp = session.get(url, timeout=15)
         resp.raise_for_status()
 
-        html = resp.text
+        text = re.sub(r"<[^>]+>", " ", resp.text)
+        text = re.sub(r"\s+", " ", text)
 
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = text.replace("&nbsp;", " ")
-        text = re.sub(r"\s+", " ", text).strip()
-
-        # Match a row like:
-        # 06/15 3.60136 3.63561 3.67923 1.24721652
-        m = re.search(
-            r"(\d{2}/\d{2})\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)\s+([0-9]+\.[0-9]+)",
+        matches = re.findall(
+            r"\d{2}/\d{2}\s+\d+\.\d+\s+(\d+\.\d+)\s+\d+\.\d+\s+\d+\.\d+",
             text
         )
 
-        if not m:
-            raise Exception("Could not find latest SOFR averages row on New York Fed page.")
+        if matches:
+            value = float(matches[0])
+            print(f"✅ SOFR from NY Fed: {value}")
+            return value
 
-        row_date = m.group(1)
-        avg_30 = m.group(2)
-        avg_90 = m.group(3)
-        avg_180 = m.group(4)
-        sofr_index = m.group(5)
-
-        print(
-            f"SOFR 90-day raw (NY Fed): {row_date} | "
-            f"30D={avg_30} | 90D={avg_90} | 180D={avg_180} | INDEX={sofr_index}"
-        )
-
-        return float(avg_90)
+        raise Exception("No SOFR rows found")
 
     except Exception as e:
-        raise Exception(f"Could not fetch 90-day SOFR from FRED or New York Fed. Last error: {e}")
+        print(f"❌ NY Fed failed: {e}")
+        raise Exception("SOFR fetch failed (both sources)")
+
 
 def fetch_hibor_3m():
     # HKMA API
