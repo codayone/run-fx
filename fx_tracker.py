@@ -352,20 +352,22 @@ import requests
 import pandas as pd
 
 def fetch_indonia_3m_compounded():
-    url = "https://cbonds.com/indexes/59993/"
+    import requests
+    import pandas as pd
+    from io import StringIO
+
+    url = "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx"
     headers = {"User-Agent": "Mozilla/5.0"}
 
     resp = requests.get(url, headers=headers, timeout=30)
-    tables = pd.read_html(resp.text)
+    tables = pd.read_html(StringIO(resp.text))
 
     for df in tables:
         df = df.astype(str)
 
-        # look for 90 Days = 3M
+        # find 90 days row
         mask = df.apply(
-            lambda row: row.astype(str)
-            .str.contains("90 Days", case=False)
-            .any(),
+            lambda row: row.astype(str).str.contains("90", case=False).any(),
             axis=1
         )
 
@@ -374,7 +376,9 @@ def fetch_indonia_3m_compounded():
             values = pd.to_numeric(row, errors="coerce").dropna()
 
             if not values.empty:
-                return float(values.iloc[0])
+                val = float(values.iloc[0])
+                if 0 < val < 20:
+                    return val
 
     return None
         
