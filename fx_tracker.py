@@ -350,48 +350,57 @@ def fetch_tibor_3m():
 
 def fetch_indonia_3m_compounded():
     """
-    Fetch INDONIA with retry logic (important for BI blocking)
+    Robust INDONIA fetcher with multiple fallback sources
     """
 
     import requests
     import pandas as pd
-    from io import StringIO
     import time
-
-    url = "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx"
+    from io import StringIO
 
     headers = {
         "User-Agent": "Mozilla/5.0"
     }
 
-    for attempt in range(4):   # ✅ try multiple times
+    urls = [
+        # ✅ BEST WORKING (your proven one)
+        "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx",
 
-        try:
-            resp = requests.get(url, headers=headers, timeout=30)
-            resp.raise_for_status()
+        # ✅ sometimes works
+        "https://www.bi.go.id/en/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
 
-            tables = pd.read_html(StringIO(resp.text))
+        # ✅ sometimes works (Indonesian version)
+        "https://www.bi.go.id/id/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
+    ]
 
-            for table in tables:
-                for col in table.columns:
-                    values = pd.to_numeric(table[col], errors="coerce").dropna()
+    for url in urls:
+        for attempt in range(2):  # ✅ small retry per URL
+            try:
+                resp = requests.get(url, headers=headers, timeout=30)
+                resp.raise_for_status()
 
-                    if not values.empty:
-                        value = float(values.iloc[0])
+                tables = pd.read_html(StringIO(resp.text))
 
-                        # sanity check
-                        if 0 < value < 20:
-                            print(f"✅ INDONIA fetched: {value}")
-                            return value
+                for table in tables:
+                    for col in table.columns:
+                        values = pd.to_numeric(table[col], errors="coerce").dropna()
 
-            print("⚠️ INDONIA table parsed but no valid number")
+                        if not values.empty:
+                            value = float(values.iloc[0])
 
-        except Exception as e:
-            print(f"⚠️ INDONIA attempt {attempt+1} failed: {e}")
+                            # ✅ sanity check
+                            if 0 < value < 20:
+                                print(f"✅ INDONIA from {url}: {value}")
+                                return value
 
-        time.sleep(3)  # ✅ wait before retry
+                print(f"⚠️ No usable value from {url}")
 
-    print("⚠️ INDONIA FAILED after retries")
+            except Exception as e:
+                print(f"⚠️ Failed {url} (attempt {attempt+1}): {e}")
+
+                time.sleep(2)  # wait before retry
+
+    print("⚠️ ALL INDONIA SOURCES FAILED")
     return None
         
 def fetch_benchmark_rates():
