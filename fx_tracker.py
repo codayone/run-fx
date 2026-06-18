@@ -226,44 +226,69 @@ def fetch_hibor_3m():
     import requests
     import pandas as pd
 
-    url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily?segment=hibor.fixing"
-
-    resp = requests.get(url, timeout=30)
-
-    # ✅ Check response first
-    if resp.status_code != 200:
-        raise Exception(f"HKMA API failed: {resp.status_code}")
-
-    # ✅ Try parse JSON safely
+    # ======================
+    # ✅ PRIMARY: HKMA API
+    # ======================
     try:
-        data = resp.json()
-    except Exception:
-        raise Exception("HKMA API returned non-JSON response")
+        url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily?segment=hibor.fixing"
+        resp = requests.get(url, timeout=30)
 
-    # ✅ Handle structure safely
-    records = None
-    if isinstance(data, dict):
-        if "result" in data and isinstance(data["result"], dict):
-            records = data["result"].get("records")
-        else:
-            records = data.get("records")
+        if resp.status_code == 200:
+            data = resp.json()
 
-    if not records:
-        raise Exception("No records found in HKMA API")
+            records = None
+            if isinstance(data, dict):
+                if "result" in data and isinstance(data["result"], dict):
+                    records = data["result"].get("records")
+                else:
+                    records = data.get("records")
 
-    df = pd.DataFrame(records)
+            if records:
+                df = pd.DataFrame(records)
 
-    # ✅ Make sure column exists
-    if "ir_3m" not in df.columns:
-        raise Exception("ir_3m column missing")
+                if "ir_3m" in df.columns:
+                    df["ir_3m"] = pd.to_numeric(df["ir_3m"], errors="coerce")
+                    df = df.dropna(subset=["ir_3m"])
 
-    df["ir_3m"] = pd.to_numeric(df["ir_3m"], errors="coerce")
-    df = df.dropna(subset=["ir_3m"])
+                    if not df.empty:
+                        print("✅ HIBOR from HKMA API")
+                        return float(df.iloc[0]["ir_3m"])
 
-    if df.empty:
-        raise Exception("No valid HIBOR values")
+        print("⚠️ HKMA API failed, switching to fallback")
 
-    return float(df.iloc[0]["ir_3m"])
+    except Exception as e:
+        print(f"⚠️ HKMA API error: {e}")
+
+    # ======================
+    # ✅ SECONDARY: fallback website
+    # ======================
+    try:
+        url = "https://www.hkab.org.hk/DisplayInterestRates.do?lang=eng"
+        tables = pd.read_html(url)
+
+        for df in tables:
+            df = df.astype(str)
+
+            # find row with 3 month
+            mask = df.apply(
+                lambda row: row.astype(str).str.contains("3 Month", case=False).any(),
+                axis=1
+            )
+
+            if mask.any():
+                row = df[mask].iloc[0]
+                values = pd.to_numeric(row, errors="coerce").dropna()
+
+                if not values.empty:
+                    val = float(values.iloc[0])
+                    print("✅ HIBOR from HKAB website")
+                    return val
+
+    except Exception as e:
+        print(f"⚠️ HKAB fallback failed: {e}")
+
+    print("❌ ALL HIBOR SOURCES FAILED")
+    return None
 
 
 def fetch_sora_1m():
