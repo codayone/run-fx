@@ -772,18 +772,18 @@ def send_email(current_rates, previous_rates, changes,
             <td>{status}</td>
         </tr>
         """
-    
-    benchmark_section = f"""
-    <table border="1" cellpadding="5">
-    <tr>
-        <th>Benchmark</th>
-        <th>Value</th>
-        <th>Change</th>
-        <th>Status</th>
-    </tr>
-    {benchmark_rows}
-    </table>
-    """
+
+        benchmark_section = f"""
+        <table border="1" cellpadding="5">
+        <tr>
+            <th>Benchmark</th>
+            <th>Value</th>
+            <th>Change</th>
+            <th>Status</th>
+        </tr>
+        {benchmark_rows}
+        </table>
+        """
 
     body = f"""
 <html>
