@@ -223,24 +223,46 @@ def fetch_sofr_3m_compounded():
         return None
 
 def fetch_hibor_3m():
-    # HKMA API
-    url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily?segment=hibor.fixing"
-    data = requests.get(url, timeout=30).json()
+    import requests
+    import pandas as pd
 
-    # HKMA JSON wrappers can differ slightly, so handle a few common shapes
+    url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily?segment=hibor.fixing"
+
+    resp = requests.get(url, timeout=30)
+
+    # ✅ Check response first
+    if resp.status_code != 200:
+        raise Exception(f"HKMA API failed: {resp.status_code}")
+
+    # ✅ Try parse JSON safely
+    try:
+        data = resp.json()
+    except Exception:
+        raise Exception("HKMA API returned non-JSON response")
+
+    # ✅ Handle structure safely
     records = None
     if isinstance(data, dict):
-        if "result" in data and isinstance(data["result"], dict) and "records" in data["result"]:
-            records = data["result"]["records"]
-        elif "records" in data:
-            records = data["records"]
+        if "result" in data and isinstance(data["result"], dict):
+            records = data["result"].get("records")
+        else:
+            records = data.get("records")
 
     if not records:
-        raise Exception("Could not parse HKMA HIBOR API response.")
+        raise Exception("No records found in HKMA API")
 
     df = pd.DataFrame(records)
+
+    # ✅ Make sure column exists
+    if "ir_3m" not in df.columns:
+        raise Exception("ir_3m column missing")
+
     df["ir_3m"] = pd.to_numeric(df["ir_3m"], errors="coerce")
     df = df.dropna(subset=["ir_3m"])
+
+    if df.empty:
+        raise Exception("No valid HIBOR values")
+
     return float(df.iloc[0]["ir_3m"])
 
 
