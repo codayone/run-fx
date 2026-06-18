@@ -350,14 +350,13 @@ def fetch_tibor_3m():
 
 def fetch_indonia_3m_compounded():
     """
-    Fetch latest 3M / 90-day Compounded INDONIA
-    from BI official page (robust version)
+    Fetch INDONIA with retry logic (important for BI blocking)
     """
 
     import requests
     import pandas as pd
-    import re
     from io import StringIO
+    import time
 
     url = "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx"
 
@@ -365,54 +364,35 @@ def fetch_indonia_3m_compounded():
         "User-Agent": "Mozilla/5.0"
     }
 
-    try:
-        resp = requests.get(url, headers=headers, timeout=30)
-        resp.raise_for_status()
+    for attempt in range(4):   # ✅ try multiple times
 
-        html = resp.text
-
-        # ✅ 1) Try table parsing FIRST
         try:
-            tables = pd.read_html(StringIO(html))
+            resp = requests.get(url, headers=headers, timeout=30)
+            resp.raise_for_status()
+
+            tables = pd.read_html(StringIO(resp.text))
 
             for table in tables:
-                table = table.copy()
-
-                # Convert everything to numeric where possible
                 for col in table.columns:
-                    table[col] = pd.to_numeric(table[col], errors="coerce")
-
-                # ✅ find ANY column with valid numbers and take first value
-                for col in table.columns:
-                    values = table[col].dropna()
+                    values = pd.to_numeric(table[col], errors="coerce").dropna()
 
                     if not values.empty:
                         value = float(values.iloc[0])
 
-                        # sanity check: interest rate range
+                        # sanity check
                         if 0 < value < 20:
-                            print(f"✅ INDONIA from BI table: {value}")
+                            print(f"✅ INDONIA fetched: {value}")
                             return value
 
+            print("⚠️ INDONIA table parsed but no valid number")
+
         except Exception as e:
-            print(f"⚠️ Table parsing failed: {e}")
+            print(f"⚠️ INDONIA attempt {attempt+1} failed: {e}")
 
-        # ✅ 2) Fallback: text extraction (backup safety)
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = re.sub(r"\s+", " ", text)
+        time.sleep(3)  # ✅ wait before retry
 
-        match = re.search(r"(\d+\.\d+)", text)
-        if match:
-            value = float(match.group(1))
-            print(f"✅ INDONIA from text fallback: {value}")
-            return value
-
-        print("⚠️ INDONIA value not found")
-        return None
-
-    except Exception as e:
-        print(f"⚠️ INDONIA failed: {e}")
-        return None
+    print("⚠️ INDONIA FAILED after retries")
+    return None
         
 def fetch_benchmark_rates():
     rates = {}
