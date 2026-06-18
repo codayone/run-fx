@@ -472,119 +472,97 @@ def fetch_tibor_3m():
 
 def fetch_indonia_3m_compounded():
     """
-    Try official Bank Indonesia pages first.
-    If all official pages fail, fall back to Cbonds 90 Days IndONIA page.
+    Fetch latest 3M / 90-day Compounded INDONIA.
+
+    Tries official Bank Indonesia pages first.
+    If unavailable / blocked, returns None instead of crashing the script.
+
+    Returns:
+        float or None
     """
 
+    import requests
+    import pandas as pd
     import re
     from io import StringIO
 
-    official_urls = [
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "keep-alive",
+    }
+
+    session = requests.Session()
+    session.headers.update(headers)
+
+    urls = [
         "https://www.bi.go.id/en/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
         "https://www.bi.go.id/id/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
         "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx",
     ]
 
-    fallback_urls = [
-        "https://cbonds.com/indexes/59993/"
-    ]
+    def try_extract_from_tables(df):
+        # try to detect a 3M / 90-day compounded column
+        possible_cols = []
+        for c in df.columns:
+            c_upper = str(c).upper()
+            if (
+                ("3M" in c_upper) or
+                ("3 M" in c_upper) or
+                ("90" in c_upper) or
+                ("90-DAY" in c_upper) or
+                ("90 DAY" in c_upper)
+            ):
+                possible_cols.append(c)
 
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Connection": "close",
-    }
+        for col in possible_cols:
+            vals = pd.to_numeric(df[col], errors="coerce").dropna()
+            if not vals.empty:
+                return float(vals.iloc[0])
 
-    # ---------- 1) Official BI pages ----------
-    for url in official_urls:
+        return None
+
+    for url in urls:
         try:
-            resp = requests.get(url, headers=headers, timeout=30)
+            resp = session.get(url, timeout=30)
             resp.raise_for_status()
-            html = resp.text
-        except Exception as e:
-            print(f"INDONIA official source failed: {url} | {e}")
-            continue
 
-        # Try HTML tables first
-        try:
-            tables = pd.read_html(StringIO(html))
-        except Exception:
-            tables = []
-
-        for tbl in tables:
-            tbl.columns = [str(c).strip() for c in tbl.columns]
-
-            # Case A: tenor appears in row values
-            for col in tbl.columns:
-                mask = tbl[col].astype(str).str.contains(
-                    r"90\s*(day|days|hari)|3\s*month|3\s*months|3\s*bulan",
-                    case=False,
-                    na=False,
-                    regex=True,
-                )
-                if mask.any():
-                    for value_col in tbl.columns:
-                        if value_col != col:
-                            vals = pd.to_numeric(tbl.loc[mask, value_col], errors="coerce").dropna()
-                            if not vals.empty:
-                                value = float(vals.iloc[0])
-                                print(f"INDONIA 90D official table raw ({url}): {value}")
-                                return value
-
-            # Case B: tenor appears in column names
-            for c in tbl.columns:
-                if re.search(r"90\s*(day|days|hari)|3\s*month|3\s*months|3\s*bulan", c, flags=re.IGNORECASE):
-                    vals = pd.to_numeric(tbl[c], errors="coerce").dropna()
-                    if not vals.empty:
-                        value = float(vals.iloc[0])
-                        print(f"INDONIA 90D official column raw ({url}): {value}")
+            # 1) Try HTML tables
+            try:
+                tables = pd.read_html(StringIO(resp.text))
+                for table in tables:
+                    value = try_extract_from_tables(table)
+                    if value is not None:
+                        print(f"✅ INDONIA from official BI table: {value}")
                         return value
+            except Exception:
+                pass
 
-        # Try raw page text
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = text.replace("&nbsp;", " ")
-        text = re.sub(r"\s+", " ", text).strip()
+            # 2) Try lightweight text scan
+            text = re.sub(r"<[^>]+>", " ", resp.text)
+            text = re.sub(r"\s+", " ", text)
 
-        patterns = [
-            r"90\s*(?:day|days|hari)\D{0,60}([0-9]+\.[0-9]+)",
-            r"3\s*(?:month|months|bulan)\D{0,60}([0-9]+\.[0-9]+)",
-        ]
+            # very broad fallback patterns for 3M / 90-day type labels
+            patterns = [
+                r"(?:3M|3\s*MONTH|3\s*BULAN)[^\d]{0,30}(\d+\.\d+)",
+                r"(?:90\s*DAY|90-DAY|90\s*HARI)[^\d]{0,30}(\d+\.\d+)",
+            ]
 
-        for p in patterns:
-            m = re.search(p, text, flags=re.IGNORECASE)
-            if m:
-                value = float(m.group(1))
-                print(f"INDONIA 90D official text raw ({url}): {value}")
-                return value
+            for pattern in patterns:
+                m = re.search(pattern, text, flags=re.IGNORECASE)
+                if m:
+                    value = float(m.group(1))
+                    print(f"✅ INDONIA from official BI text: {value}")
+                    return value
 
-    # ---------- 2) Fallback website: Cbonds ----------
-    for url in fallback_urls:
-        try:
-            resp = requests.get(url, headers=headers, timeout=30)
-            resp.raise_for_status()
-            html = resp.text
+            print(f"⚠️ INDONIA official source had no usable 3M/90D value: {url}")
+
         except Exception as e:
-            print(f"INDONIA fallback source failed: {url} | {e}")
-            continue
+            print(f"⚠️ INDONIA official source failed: {url} | {e}")
 
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = text.replace("&nbsp;", " ")
-        text = re.sub(r"\s+", " ", text).strip()
-
-        # Try to find the 90 Days IndONIA value near its label
-        patterns = [
-            r"90\s*Days\s*IndONIA[^0-9]*([0-9]+\.[0-9]+)",
-            r"90\s*Days\s*IndONIA.*?([0-9]+\.[0-9]+)",
-        ]
-
-        for p in patterns:
-            m = re.search(p, text, flags=re.IGNORECASE)
-            if m:
-                value = float(m.group(1))
-                print(f"INDONIA 90D fallback raw ({url}): {value}")
-                return value
-
-    raise Exception("Could not fetch 3M / 90-day Compounded INDONIA from official BI pages or fallback website.")
+    print("⚠️ Could not fetch 3M / 90-day Compounded INDONIA from available official pages")
+    return None
 
 
 def fetch_benchmark_rates():
