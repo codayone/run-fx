@@ -401,6 +401,19 @@ def fetch_indonia_3m_compounded():
         text = re.sub(r"<[^>]+>", " ", html)
         text = re.sub(r"\s+", " ", text)
 
+        match = re.search(r"(\d+\.\d+)", text)
+        if match:
+            value = float(match.group(1))
+            print(f"✅ INDONIA from text fallback: {value}")
+            return value
+
+        print("⚠️ INDONIA value not found")
+        return None
+
+    except Exception as e:
+        print(f"⚠️ INDONIA failed: {e}")
+        return None
+        
 def fetch_benchmark_rates():
     rates = {}
 
