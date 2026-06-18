@@ -266,11 +266,15 @@ def fetch_klibor_3m():
 def fetch_sofr_3m_compounded():
     """
     Fetch latest 90-day Average SOFR.
-    Primary: FRED CSV
-    Fallback: New York Fed page
+
+    Priority:
+    1. FRED CSV (fast & reliable)
+    2. NY Fed table (structured fallback, no regex)
+
+    Returns:
+        float or None
     """
 
-    import re
     import requests
     import pandas as pd
     from io import StringIO
@@ -282,15 +286,17 @@ def fetch_sofr_3m_compounded():
     session = requests.Session()
     session.headers.update(headers)
 
-    # ---------- FRED (1 try only) ----------
+    # =========================
+    # 1️⃣ FRED CSV (PRIMARY)
+    # =========================
     try:
         url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR90DAYAVG"
-        resp = session.get(url, timeout=15)
+        resp = session.get(url, timeout=30)
         resp.raise_for_status()
 
         df = pd.read_csv(StringIO(resp.text))
 
-        # find value column
+        # Identify the value column (not date)
         value_col = [c for c in df.columns if str(c).upper() != "OBSERVATION_DATE"][0]
 
         df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
@@ -304,30 +310,35 @@ def fetch_sofr_3m_compounded():
     except Exception as e:
         print(f"⚠️ FRED failed: {e}")
 
+    # =========================
+    # 2️⃣ NY FED TABLE (FALLBACK)
+    # =========================
     try:
         url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
-        resp = session.get(url, timeout=15)
-        resp.raise_for_status()
 
-        text = re.sub(r"<[^>]+>", " ", resp.text)
-        text = re.sub(r"\s+", " ", text)
+        tables = pd.read_html(url)
 
-        matches = re.findall(
-            r"\d{2}/\d{2}\s+\d+\.\d+\s+(\d+\.\d+)\s+\d+\.\d+\s+\d+\.\d+",
-            text
-        )
+        for table in tables:
+            # find correct table dynamically
+            col_90d = [c for c in table.columns if "90-DAY" in str(c).upper()]
 
-        if matches:
-            value = float(matches[0])
-            print(f"✅ SOFR from NY Fed: {value}")
-            return value
+            if col_90d:
+                col_90d = col_90d[0]
 
-        raise Exception("No SOFR rows found")
+                # latest row = first row
+                row = table.iloc[0]
+
+                value = float(row[col_90d])
+
+                print(f"✅ SOFR from NY Fed: {value}")
+                return value
+
+        print("⚠️ SOFR table not found on NY Fed page")
+        return None
 
     except Exception as e:
-        print(f"❌ NY Fed failed: {e}")
-        raise Exception("SOFR fetch failed (both sources)")
-
+        print(f"⚠️ NY Fed failed: {e}")
+        return None
 
 def fetch_hibor_3m():
     # HKMA API
