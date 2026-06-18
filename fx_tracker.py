@@ -18,6 +18,17 @@ BASE_CURRENCY = "USD"
 # BENCHMARK CONFIG
 # ============================================
 # loan_id can be whatever name you want for each facility/loan
+FX_ALERT_THRESHOLD = 0.005    # 0.5%
+BENCHMARK_ALERT_THRESHOLD = 0.01   # 0.01 percentage point = 1 bp
+
+# unique benchmark labels for reporting
+BENCHMARK_LABELS = {}
+for item in LOAN_BENCHMARKS:
+    BENCHMARK_LABELS.setdefault(
+        item["fetch_key"],
+        f'{item["currency"]} - {item["benchmark"]}'
+    )
+
 LOAN_BENCHMARKS = [
     {"loan_id": "THB_1", "currency": "THB", "benchmark": "3M Compound O/N THOR", "fetch_key": "THOR_3M"},
     {"loan_id": "MYR_1", "currency": "MYR", "benchmark": "3M KLIBOR", "fetch_key": "KLIBOR_3M"},
@@ -568,15 +579,24 @@ def fetch_indonia_3m_compounded():
 def fetch_benchmark_rates():
     rates = {}
 
-    rates["THOR_3M"] = fetch_thor_3m()
-    rates["KLIBOR_3M"] = fetch_klibor_3m()
-    rates["SOFR_3M_COMPOUNDED"] = fetch_sofr_3m_compounded()
-    rates["HIBOR_3M"] = fetch_hibor_3m()
-    rates["SORA_1M"] = fetch_sora_1m()
-    rates["TIBOR_3M"] = fetch_tibor_3m()
-    rates["EURIBOR_3M"] = fetch_euribor_3m()
-    rates["INDONIA_3M_COMPOUNDED"] = fetch_indonia_3m_compounded()
-    rates["FIXED_9_75"] = fetch_fixed_975()
+    fetchers = {
+        "THOR_3M": fetch_thor_3m,
+        "KLIBOR_3M": fetch_klibor_3m,
+        "SOFR_3M_COMPOUNDED": fetch_sofr_3m_compounded,
+        "HIBOR_3M": fetch_hibor_3m,
+        "SORA_1M": fetch_sora_1m,
+        "TIBOR_3M": fetch_tibor_3m,
+        "EURIBOR_3M": fetch_euribor_3m,
+        "INDONIA_3M_COMPOUNDED": fetch_indonia_3m_compounded,
+        "FIXED_9_75": fetch_fixed_975,
+    }
+
+    for key, func in fetchers.items():
+        try:
+            rates[key] = func()
+        except Exception as e:
+            print(f"⚠️ {key} failed: {e}")
+            rates[key] = None
 
     return rates
 
@@ -716,13 +736,129 @@ print(f"Malaysia Overnight Rate changed today? {overnight_changed}")
 # =========================
 # 9) SEND EMAIL
 # =========================
-send_email(
-    current_rates=current_rates,
-    previous_rates=previous_rates,
-    changes=changes,
-    overnight_rate=overnight_rate,
-    yesterday_overnight_rate=yesterday_overnight_rate,
-    overnight_changed=overnight_changed,
-    currencies=CURRENCIES,
-    base_currency=BASE_CURRENCY
-)
+def send_email(current_rates, previous_rates, changes,
+               current_benchmark_rates, previous_benchmark_rates, benchmark_changes,
+               currencies, base_currency):
+
+    fx_section = ""
+
+    for ccy in currencies:
+        curr = float(current_rates[ccy])
+        prev = float(previous_rates.get(ccy, curr))
+        change = float(changes.get(ccy, 0))
+
+        if change > 0:
+            direction = "↑"
+        elif change < 0:
+            direction = "↓"
+        else:
+            direction = "-"
+
+        if abs(change) > FX_ALERT_THRESHOLD:
+            fx_status = "🚨 ALERT: Significant FX movement (>0.5%)"
+        else:
+            fx_status = "✅ Normal FX movement"
+
+        fx_section += f"""
+        <p><b>{base_currency}/{ccy}</b></p>
+        <p>
+        Today: <b>{curr:.4f}</b><br>
+        Yesterday: {prev:.4f}<br><br>
+        Change: {direction} {change*100:.4f}%<br><br>
+        {fx_status}
+        </p>
+        """
+
+    benchmark_section = ""
+
+    for key, label in BENCHMARK_LABELS.items():
+        curr = current_benchmark_rates.get(key)
+        prev = previous_benchmark_rates.get(key)
+
+        if curr is None or pd.isna(curr):
+            benchmark_section += f"""
+            <p><b>{label}</b></p>
+            <p>
+            Today: <b>N/A</b><br>
+            Yesterday: {"N/A" if prev is None or pd.isna(prev) else f"{float(prev):.5f}%"}<br><br>
+            ⚠️ Unavailable today
+            </p>
+            """
+            continue
+
+        curr = float(curr)
+
+        if prev is None or pd.isna(prev):
+            benchmark_section += f"""
+            <p><b>{label}</b></p>
+            <p>
+            Today: <b>{curr:.5f}%</b><br>
+            Yesterday: N/A<br><br>
+            ✅ First captured value
+            </p>
+            """
+            continue
+
+        prev = float(prev)
+        diff = curr - prev
+        diff_bps = diff * 100  # percentage point -> bps
+
+        if diff > 0:
+            direction = "↑"
+        elif diff < 0:
+            direction = "↓"
+        else:
+            direction = "-"
+
+        if abs(diff) >= BENCHMARK_ALERT_THRESHOLD:
+            status = f"🚨 ALERT: Benchmark moved {direction} {abs(diff_bps):.2f} bps"
+        else:
+            status = f"✅ Small move ({direction} {abs(diff_bps):.2f} bps)"
+
+        benchmark_section += f"""
+        <p><b>{label}</b></p>
+        <p>
+        Today: <b>{curr:.5f}%</b><br>
+        Yesterday: {prev:.5f}%<br><br>
+        Change: {direction} {abs(diff_bps):.2f} bps<br><br>
+        {status}
+        </p>
+        """
+
+    body = f"""
+<html>
+<body>
+
+<p><b>DAILY MARKET REPORT</b></p>
+
+<p><b>FX RATES</b></p>
+{fx_section}
+
+<p><b>LOAN BENCHMARK RATES</b></p>
+{benchmark_section}
+
+<p>----------------------------------<br>
+Auto-generated report</p>
+
+</body>
+</html>
+"""
+
+    msg = MIMEText(body, "html")
+    msg["Subject"] = f"Daily FX Report: {base_currency} Pairs + Benchmark Rates"
+    msg["From"] = EMAIL_FROM_DISPLAY
+    msg["To"] = EMAIL_TO
+
+    email = os.getenv("EMAIL")
+    password = os.getenv("PASSWORD")
+
+    print("EMAIL:", email)
+    print("PASSWORD length:", len(password) if password else 0)
+
+    server = smtplib.SMTP("smtp.office365.com", 587)
+    server.starttls()
+    server.login(email, password)
+    server.send_message(msg)
+    server.quit()
+
+    print("✅ Email sent successfully")
