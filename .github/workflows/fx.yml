@@ -26,3 +26,15 @@ jobs:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
         run: python fx_tracker.py
+
+      - name: Commit market_data.csv
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+            
+          git add market_data.csv
+            
+          git commit -m "Update market data CSV" || echo "No changes to commit"
+            
+          git push
+
