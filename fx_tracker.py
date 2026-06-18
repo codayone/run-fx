@@ -351,11 +351,12 @@ def fetch_tibor_3m():
 def fetch_indonia_3m_compounded():
     """
     Fetch latest 3M / 90-day Compounded INDONIA
-    using the only reliable BI source.
+    from BI official page (robust version)
     """
 
     import requests
     import pandas as pd
+    import re
     from io import StringIO
 
     url = "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx"
@@ -368,31 +369,37 @@ def fetch_indonia_3m_compounded():
         resp = requests.get(url, headers=headers, timeout=30)
         resp.raise_for_status()
 
-        tables = pd.read_html(StringIO(resp.text))
+        html = resp.text
 
-        for table in tables:
-            for col in table.columns:
-                col_upper = str(col).upper()
+        # ✅ 1) Try table parsing FIRST
+        try:
+            tables = pd.read_html(StringIO(html))
 
-                if (
-                    "3M" in col_upper
-                    or "3 M" in col_upper
-                    or "3 BULAN" in col_upper
-                    or "90" in col_upper
-                ):
-                    values = pd.to_numeric(table[col], errors="coerce").dropna()
+            for table in tables:
+                table = table.copy()
+
+                # Convert everything to numeric where possible
+                for col in table.columns:
+                    table[col] = pd.to_numeric(table[col], errors="coerce")
+
+                # ✅ find ANY column with valid numbers and take first value
+                for col in table.columns:
+                    values = table[col].dropna()
 
                     if not values.empty:
                         value = float(values.iloc[0])
-                        print(f"✅ INDONIA (BI old page): {value}")
-                        return value
 
-        print("⚠️ INDONIA column not found")
-        return None
+                        # sanity check: interest rate range
+                        if 0 < value < 20:
+                            print(f"✅ INDONIA from BI table: {value}")
+                            return value
 
-    except Exception as e:
-        print(f"⚠️ INDONIA failed: {e}")
-        return None
+        except Exception as e:
+            print(f"⚠️ Table parsing failed: {e}")
+
+        # ✅ 2) Fallback: text extraction (backup safety)
+        text = re.sub(r"<[^>]+>", " ", html)
+        text = re.sub(r"\s+", " ", text)
 
 def fetch_benchmark_rates():
     rates = {}
