@@ -348,88 +348,162 @@ def fetch_tibor_3m():
 
     raise Exception("Could not fetch 3M TIBOR from CIMB page.")
 
-import requests
-import pandas as pd
-
-# =========================
-# INDONIA 3M (ROBUST VERSION)
-# =========================
-
-import os
-import pandas as pd
-from datetime import datetime
-
-
-INDONIA_FILE = "indonia_history.csv"
-
-
-# ✅ STEP 1: append today's rate (manual or from your source)
-def update_indonia_history(today_rate):
-    today = datetime.today().strftime("%Y-%m-%d")
-
-    new_row = pd.DataFrame({
-        "date": [today],
-        "rate": [today_rate]
-    })
-
-    if os.path.exists(INDONIA_FILE):
-        df = pd.read_csv(INDONIA_FILE)
-        df = df[df["date"] != today]  # avoid duplicates
-        df = pd.concat([df, new_row], ignore_index=True)
-    else:
-        df = new_row
-
-    df.to_csv(INDONIA_FILE, index=False)
-    return df
-
-
-# ✅ STEP 2: compute 3M compounded
-def compute_indonia_3m(df):
-    df = df.sort_values("date").copy()
-
-    # convert to numeric
-    df["rate"] = pd.to_numeric(df["rate"], errors="coerce")
-
-    # convert to daily factor
-    df["factor"] = 1 + df["rate"] / 100 / 365
-
-    # rolling compounded over ~90 days
-    df["compounded"] = df["factor"].rolling(90).apply(lambda x: x.prod(), raw=True)
-
-    # convert to %
-    df["3M"] = (df["compounded"] - 1) * 100
-
-    latest = df["3M"].dropna()
-
-    if not latest.empty:
-        return float(latest.iloc[-1])
-
-    return None
-
-
-# ✅ STEP 3: main fetch function (plug into your system)
 def fetch_indonia_3m_compounded():
+    """
+    Fetch IDR - 3M Compound O/N INDONIA directly from Bank Indonesia
+    using a real browser (Selenium), so you don't need your own
+    history file and you don't need to wait to build 90 days of data.
+
+    Returns:
+        float or None
+    """
+
+    import re
+    import time
+    import pandas as pd
+    from io import StringIO
+
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+
+    urls = [
+        # current page with latest published values
+        "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/default.aspx#floating-1",
+
+        # historical compounded page
+        "https://www.bi.go.id/en/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
+
+        # Indonesian historical page
+        "https://www.bi.go.id/id/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
+    ]
+
+    def setup_driver():
+        options = Options()
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--lang=en-US")
+        options.add_argument(
+            "--user-agent=Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/126.0.0.0 Safari/537.36"
+        )
+
+        # In GitHub Actions ubuntu runners, chromedriver is usually already available.
+        # If yours needs an explicit path, replace Service() with Service("/usr/bin/chromedriver")
+        driver = webdriver.Chrome(service=Service(), options=options)
+        return driver
+
+    def extract_90_from_tables(html):
+        try:
+            tables = pd.read_html(StringIO(html))
+        except Exception:
+            tables = []
+
+        # 1) Try normal table parsing
+        for df in tables:
+            try:
+                temp = df.copy()
+                temp.columns = [str(c).strip() for c in temp.columns]
+
+                # Case A: "90 Days (%)" exists as a column
+                for col in temp.columns:
+                    if "90" in str(col).lower() and "day" in str(col).lower():
+                        vals = pd.to_numeric(temp[col], errors="coerce").dropna()
+                        vals = vals[(vals > 0) & (vals < 20)]
+                        if not vals.empty:
+                            return float(vals.iloc[0])
+
+                # Case B: header row embedded in first row
+                # search row text for "90 Days"
+                for i in range(len(temp)):
+                    row_text = " | ".join(map(str, temp.iloc[i].tolist()))
+                    if "90 Days" in row_text or "90 days" in row_text:
+                        # look a few rows after it for rates
+                        for j in range(i + 1, min(i + 4, len(temp))):
+                            nums = pd.to_numeric(temp.iloc[j], errors="coerce").dropna()
+                            nums = nums[(nums > 0) & (nums < 20)]
+                            if len(nums) >= 2:
+                                # usually row is: 30D, 90D, 180D, 360D, Index
+                                # second numeric should be 90D
+                                return float(nums.iloc[1])
+                            elif len(nums) == 1:
+                                return float(nums.iloc[0])
+            except Exception:
+                pass
+
+        # 2) Regex fallback from page source near "90 Days"
+        # This is useful when the page is rendered visually but pandas doesn't build clean tables.
+        patterns = [
+            r"90\s*Days\s*\(%\).*?([0-9]+\.[0-9]+)",
+            r"90\s*Days.*?([0-9]+\.[0-9]+)",
+        ]
+        for pat in patterns:
+            m = re.search(pat, html, flags=re.IGNORECASE | re.DOTALL)
+            if m:
+                val = float(m.group(1))
+                if 0 < val < 20:
+                    return val
+
+        return None
+
+    driver = None
     try:
-        # 🔹 YOU NEED TO UPDATE THIS DAILY
-        today_rate = None  # <-- PUT TODAY'S INDONIA HERE if you have
+        driver = setup_driver()
 
-        if today_rate is not None:
-            df = update_indonia_history(today_rate)
-        else:
-            if not os.path.exists(INDONIA_FILE):
-                print("⚠️ No INDONIA history file")
-                return None
-            df = pd.read_csv(INDONIA_FILE)
+        for url in urls:
+            try:
+                print(f"🔎 Trying INDONIA page: {url}")
+                driver.get(url)
 
-        value = compute_indonia_3m(df)
+                WebDriverWait(driver, 25).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
 
-        if value:
-            print(f"✅ INDONIA 3M (computed): {value}")
-            return value
+                # let BI scripts render
+                time.sleep(5)
+
+                html = driver.page_source
+
+                # quick block detection
+                blocked_signals = [
+                    "Access Denied",
+                    "Request failed",
+                    "challenge",
+                    "Just a moment",
+                    "RemoteDisconnected",
+                ]
+                if any(x.lower() in html.lower() for x in blocked_signals):
+                    print(f"⚠️ Page looks blocked or incomplete: {url}")
+                    continue
+
+                value = extract_90_from_tables(html)
+                if value is not None:
+                    print(f"✅ INDONIA 3M compounded (90 Days) from BI: {value}")
+                    return value
+
+                print(f"⚠️ Could not parse 90 Days value from: {url}")
+
+            except Exception as e:
+                print(f"⚠️ Failed on {url}: {e}")
 
     except Exception as e:
-        print(f"⚠️ INDONIA compute failed: {e}")
+        print(f"⚠️ Selenium setup failed: {e}")
 
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+    print("❌ INDONIA 3M compounded not found")
     return None
         
 def fetch_benchmark_rates():
