@@ -28,7 +28,6 @@ LOAN_BENCHMARKS = [
     {"loan_id": "SGD_1", "currency": "SGD", "benchmark": "1M SORA", "fetch_key": "SORA_1M"},
     {"loan_id": "JPY_1", "currency": "JPY", "benchmark": "3M TIBOR", "fetch_key": "TIBOR_3M"},
     {"loan_id": "EUR_1", "currency": "EUR", "benchmark": "3M EURIBOR", "fetch_key": "EURIBOR_3M"},
-    {"loan_id": "EUR_2", "currency": "EUR", "benchmark": "Fixed Rate at 9.75%", "fetch_key": "FIXED_9_75"},
 ]
 CURRENCIES = list(set([
     x["currency"]
@@ -332,10 +331,6 @@ def fetch_sora_1m():
     raise Exception("Could not fetch 1M SORA.")
 
 
-def fetch_fixed_975():
-    return 9.75
-
-
 def fetch_euribor_3m():
 
     import pandas as pd
@@ -500,7 +495,6 @@ def fetch_benchmark_rates():
         "TIBOR_3M": fetch_tibor_3m,
         "EURIBOR_3M": fetch_euribor_3m,
         "INDONIA_3M_COMPOUNDED": fetch_indonia_3m_compounded,
-        "FIXED_9_75": fetch_fixed_975,
     }
 
     for key, func in fetchers.items():
