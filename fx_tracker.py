@@ -728,15 +728,15 @@ def send_email(current_rates, previous_rates, changes,
     {fx_rows}
     </table>
     """
-
-        <p><b>{base_currency}/{ccy}</b></p>
-        <p>
-        Today: <b>{curr:.4f}</b><br>
-        Yesterday: {prev:.4f}<br><br>
-        Change: {direction} {change*100:.4f}%<br><br>
-        {fx_status}
-        </p>
-        """
+    <p><b>{base_currency}/{ccy}</b></p>
+    <p>
+    Today: <b>{curr:.4f}</b><br>
+    Yesterday: {prev:.4f}<br><br>
+    Change: {direction} {change*100:.4f}%<br><br>
+    {fx_status}
+    </p>
+    """
+      
 
     benchmark_rows = ""
     
