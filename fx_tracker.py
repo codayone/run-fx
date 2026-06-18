@@ -350,7 +350,7 @@ def fetch_tibor_3m():
 
 def fetch_indonia_3m_compounded():
     """
-    Robust INDONIA fetcher with multiple fallback sources
+    Robust INDONIA 3M compounded fetcher
     """
 
     import requests
@@ -363,44 +363,57 @@ def fetch_indonia_3m_compounded():
     }
 
     urls = [
-        # ✅ BEST WORKING (your proven one)
         "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx",
-
-        # ✅ sometimes works
         "https://www.bi.go.id/en/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
-
-        # ✅ sometimes works (Indonesian version)
         "https://www.bi.go.id/id/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
     ]
 
+    def extract_3m_from_table(df):
+        """
+        Try to locate 3M column intelligently
+        """
+        df.columns = [str(c).lower() for c in df.columns]
+
+        for col in df.columns:
+            if "3" in col and ("month" in col or "m" in col):
+                values = pd.to_numeric(df[col], errors="coerce").dropna()
+                if not values.empty:
+                    return float(values.iloc[-1])  # ✅ use latest value
+
+        # fallback: try rows mentioning 3M
+        for i in range(len(df)):
+            row_str = " ".join(map(str, df.iloc[i].values)).lower()
+            if "3m" in row_str or "3 month" in row_str:
+                nums = pd.to_numeric(df.iloc[i], errors="coerce").dropna()
+                if not nums.empty:
+                    return float(nums.iloc[-1])
+
+        return None
+
     for url in urls:
-        for attempt in range(2):  # ✅ small retry per URL
+        for attempt in range(2):
             try:
+                print(f"🔎 Trying {url} (attempt {attempt+1})")
+
                 resp = requests.get(url, headers=headers, timeout=30)
                 resp.raise_for_status()
 
                 tables = pd.read_html(StringIO(resp.text))
 
-                for table in tables:
-                    for col in table.columns:
-                        values = pd.to_numeric(table[col], errors="coerce").dropna()
+                for idx, table in enumerate(tables):
+                    value = extract_3m_from_table(table)
 
-                        if not values.empty:
-                            value = float(values.iloc[0])
+                    if value and 0 < value < 20:
+                        print(f"✅ INDONIA 3M from table {idx}: {value}")
+                        return value
 
-                            # ✅ sanity check
-                            if 0 < value < 20:
-                                print(f"✅ INDONIA from {url}: {value}")
-                                return value
-
-                print(f"⚠️ No usable value from {url}")
+                print(f"⚠️ No 3M found in {url}")
 
             except Exception as e:
-                print(f"⚠️ Failed {url} (attempt {attempt+1}): {e}")
+                print(f"⚠️ Failed {url}: {e}")
+                time.sleep(2)
 
-                time.sleep(2)  # wait before retry
-
-    print("⚠️ ALL INDONIA SOURCES FAILED")
+    print("❌ ALL INDONIA SOURCES FAILED")
     return None
         
 def fetch_benchmark_rates():
