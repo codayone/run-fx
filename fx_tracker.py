@@ -351,34 +351,84 @@ def fetch_tibor_3m():
 import requests
 import pandas as pd
 
+# =========================
+# INDONIA 3M (ROBUST VERSION)
+# =========================
+
+import os
+import pandas as pd
+from datetime import datetime
+
+
+INDONIA_FILE = "indonia_history.csv"
+
+
+# ✅ STEP 1: append today's rate (manual or from your source)
+def update_indonia_history(today_rate):
+    today = datetime.today().strftime("%Y-%m-%d")
+
+    new_row = pd.DataFrame({
+        "date": [today],
+        "rate": [today_rate]
+    })
+
+    if os.path.exists(INDONIA_FILE):
+        df = pd.read_csv(INDONIA_FILE)
+        df = df[df["date"] != today]  # avoid duplicates
+        df = pd.concat([df, new_row], ignore_index=True)
+    else:
+        df = new_row
+
+    df.to_csv(INDONIA_FILE, index=False)
+    return df
+
+
+# ✅ STEP 2: compute 3M compounded
+def compute_indonia_3m(df):
+    df = df.sort_values("date").copy()
+
+    # convert to numeric
+    df["rate"] = pd.to_numeric(df["rate"], errors="coerce")
+
+    # convert to daily factor
+    df["factor"] = 1 + df["rate"] / 100 / 365
+
+    # rolling compounded over ~90 days
+    df["compounded"] = df["factor"].rolling(90).apply(lambda x: x.prod(), raw=True)
+
+    # convert to %
+    df["3M"] = (df["compounded"] - 1) * 100
+
+    latest = df["3M"].dropna()
+
+    if not latest.empty:
+        return float(latest.iloc[-1])
+
+    return None
+
+
+# ✅ STEP 3: main fetch function (plug into your system)
 def fetch_indonia_3m_compounded():
-    import requests
-    import pandas as pd
-    from io import StringIO
+    try:
+        # 🔹 YOU NEED TO UPDATE THIS DAILY
+        today_rate = None  # <-- PUT TODAY'S INDONIA HERE if you have
 
-    url = "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx"
-    headers = {"User-Agent": "Mozilla/5.0"}
+        if today_rate is not None:
+            df = update_indonia_history(today_rate)
+        else:
+            if not os.path.exists(INDONIA_FILE):
+                print("⚠️ No INDONIA history file")
+                return None
+            df = pd.read_csv(INDONIA_FILE)
 
-    resp = requests.get(url, headers=headers, timeout=30)
-    tables = pd.read_html(StringIO(resp.text))
+        value = compute_indonia_3m(df)
 
-    for df in tables:
-        df = df.astype(str)
+        if value:
+            print(f"✅ INDONIA 3M (computed): {value}")
+            return value
 
-        # find 90 days row
-        mask = df.apply(
-            lambda row: row.astype(str).str.contains("90", case=False).any(),
-            axis=1
-        )
-
-        if mask.any():
-            row = df[mask].iloc[0]
-            values = pd.to_numeric(row, errors="coerce").dropna()
-
-            if not values.empty:
-                val = float(values.iloc[0])
-                if 0 < val < 20:
-                    return val
+    except Exception as e:
+        print(f"⚠️ INDONIA compute failed: {e}")
 
     return None
         
