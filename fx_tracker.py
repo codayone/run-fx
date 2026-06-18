@@ -17,18 +17,6 @@ BASE_CURRENCY = "USD"
 # ============================================
 # BENCHMARK CONFIG
 # ============================================
-# loan_id can be whatever name you want for each facility/loan
-FX_ALERT_THRESHOLD = 0.005    # 0.5%
-BENCHMARK_ALERT_THRESHOLD = 0.01   # 0.01 percentage point = 1 bp
-
-# unique benchmark labels for reporting
-BENCHMARK_LABELS = {}
-for item in LOAN_BENCHMARKS:
-    BENCHMARK_LABELS.setdefault(
-        item["fetch_key"],
-        f'{item["currency"]} - {item["benchmark"]}'
-    )
-
 LOAN_BENCHMARKS = [
     {"loan_id": "THB_1", "currency": "THB", "benchmark": "3M Compound O/N THOR", "fetch_key": "THOR_3M"},
     {"loan_id": "MYR_1", "currency": "MYR", "benchmark": "3M KLIBOR", "fetch_key": "KLIBOR_3M"},
@@ -47,7 +35,18 @@ CURRENCIES = list(set([
     for x in LOAN_BENCHMARKS
     if not (x["currency"] == "EUR" and "Fixed" in x["benchmark"])
 ]))
+
+# loan_id can be whatever name you want for each facility/loan
 FX_ALERT_THRESHOLD = 0.005    # 0.5%
+BENCHMARK_ALERT_THRESHOLD = 0.01   # 0.01 percentage point = 1 bp
+
+# unique benchmark labels for reporting
+BENCHMARK_LABELS = {}
+for item in LOAN_BENCHMARKS:
+    BENCHMARK_LABELS.setdefault(
+        item["fetch_key"],
+        f'{item["currency"]} - {item["benchmark"]}'
+    )
 
 EMAIL_TO = "tangsuancoco.tan@dayonedc.com"
 EMAIL_FROM_DISPLAY = "FX Bot <tangsuancoco.tan@dayonedc.com>"
