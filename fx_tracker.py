@@ -351,7 +351,7 @@ def fetch_tibor_3m():
 import requests
 import pandas as pd
 
-def fetch_indonia_3m_cbonds():
+def fetch_indonia_3m_compounded():
     url = "https://cbonds.com/indexes/59993/"
     headers = {"User-Agent": "Mozilla/5.0"}
 
@@ -362,7 +362,12 @@ def fetch_indonia_3m_cbonds():
         df = df.astype(str)
 
         # look for 90 Days = 3M
-        mask = df.apply(lambda row: row.astype(str).str.contains("90", case=False).any(), axis=1)
+        mask = df.apply(
+            lambda row: row.astype(str)
+            .str.contains("90 Days", case=False)
+            .any(),
+            axis=1
+        )
 
         if mask.any():
             row = df[mask].iloc[0]
