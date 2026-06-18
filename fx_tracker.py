@@ -738,61 +738,52 @@ def send_email(current_rates, previous_rates, changes,
         </p>
         """
 
-    benchmark_section = ""
-
+    benchmark_rows = ""
+    
     for key, label in BENCHMARK_LABELS.items():
         curr = current_benchmark_rates.get(key)
         prev = previous_benchmark_rates.get(key)
-
+    
         if curr is None or pd.isna(curr):
-            benchmark_section += f"""
-            <p><b>{label}</b></p>
-            <p>
-            Today: <b>N/A</b><br>
-            Yesterday: {"N/A" if prev is None or pd.isna(prev) else f"{float(prev):.5f}%"}<br><br>
-            ⚠️ Unavailable today
-            </p>
-            """
-            continue
-
-        curr = float(curr)
-
-        if prev is None or pd.isna(prev):
-            benchmark_section += f"""
-            <p><b>{label}</b></p>
-            <p>
-            Today: <b>{curr:.5f}%</b><br>
-            Yesterday: N/A<br><br>
-            ✅ First captured value
-            </p>
-            """
-            continue
-
-        prev = float(prev)
-        diff = curr - prev
-        diff_bps = diff * 100  # percentage point -> bps
-
-        if diff > 0:
-            direction = "↑"
-        elif diff < 0:
-            direction = "↓"
+            curr_txt = "N/A"
+            status = "⚠️"
+            change_txt = "N/A"
         else:
-            direction = "-"
-
-        if abs(diff) >= BENCHMARK_ALERT_THRESHOLD:
-            status = f"🚨 ALERT: Benchmark moved {direction} {abs(diff_bps):.2f} bps"
-        else:
-            status = f"✅ Small move ({direction} {abs(diff_bps):.2f} bps)"
-
-        benchmark_section += f"""
-        <p><b>{label}</b></p>
-        <p>
-        Today: <b>{curr:.5f}%</b><br>
-        Yesterday: {prev:.5f}%<br><br>
-        Change: {direction} {abs(diff_bps):.2f} bps<br><br>
-        {status}
-        </p>
+            curr = float(curr)
+            curr_txt = f"{curr:.5f}%"
+    
+            if prev is None or pd.isna(prev):
+                change_txt = "-"
+                status = "🆕"
+            else:
+                prev = float(prev)
+                diff = (curr - prev) * 100
+    
+                arrow = "↑" if diff > 0 else "↓" if diff < 0 else "-"
+                change_txt = f"{arrow} {abs(diff):.2f} bps"
+    
+                status = "🚨" if abs(diff) >= 1 else "✅"
+    
+        benchmark_rows += f"""
+        <tr>
+            <td>{label}</td>
+            <td>{curr_txt}</td>
+            <td>{change_txt}</td>
+            <td>{status}</td>
+        </tr>
         """
+    
+    benchmark_section = f"""
+    <table border="1" cellpadding="5">
+    <tr>
+        <th>Benchmark</th>
+        <th>Value</th>
+        <th>Change</th>
+        <th>Status</th>
+    </tr>
+    {benchmark_rows}
+    </table>
+    """
 
     body = f"""
 <html>
