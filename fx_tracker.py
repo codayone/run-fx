@@ -53,93 +53,6 @@ EMAIL_TO = "tangsuancoco.tan@dayonedc.com"
 EMAIL_FROM_DISPLAY = "FX Bot <tangsuancoco.tan@dayonedc.com>"
 CSV_FILE = "market_data.csv"
 
-
-# =========================
-# EMAIL FUNCTION
-# =========================
-def send_email(current_rates, previous_rates, changes,
-               overnight_rate, yesterday_overnight_rate,
-               overnight_changed, currencies, base_currency):
-
-    fx_section = ""
-
-    for ccy in currencies:
-        curr = float(current_rates[ccy])
-        prev = float(previous_rates.get(ccy, curr))
-        change = float(changes.get(ccy, 0))
-
-        if change > 0:
-            direction = "↑"
-        elif change < 0:
-            direction = "↓"
-        else:
-            direction = "-"
-
-        if abs(change) > FX_ALERT_THRESHOLD:
-            fx_status = "🚨 ALERT: Significant FX movement (>0.5%)"
-        else:
-            fx_status = "✅ Normal FX movement"
-
-        fx_section += f"""
-        <p><b>{base_currency}/{ccy}</b></p>
-        <p>
-        Today: <b>{curr:.4f}</b><br>
-        Yesterday: {prev:.4f}<br><br>
-        Change: {direction} {change*100:.4f}%<br><br>
-        {fx_status}
-        </p>
-        """
-
-    if overnight_changed:
-        overnight_status = (
-            f"🚨 ALERT: Rate changed from {yesterday_overnight_rate:.2f}% "
-            f"to {overnight_rate:.2f}%"
-        )
-    else:
-        overnight_status = f"✅ No change ({overnight_rate:.2f}%)"
-
-    body = f"""
-<html>
-<body>
-
-<p><b>DAILY MARKET REPORT</b></p>
-
-{fx_section}
-
-<p><b>Malaysia Overnight Rate</b></p>
-<p>
-Today: <b>{overnight_rate:.2f}%</b><br>
-Yesterday: {yesterday_overnight_rate:.2f}%<br><br>
-{overnight_status}
-</p>
-
-<p>----------------------------------<br>
-Auto-generated report</p>
-
-</body>
-</html>
-"""
-
-    msg = MIMEText(body, "html")
-    msg["Subject"] = f"Daily FX Report: {base_currency} Pairs"
-    msg["From"] = EMAIL_FROM_DISPLAY
-    msg["To"] = EMAIL_TO
-
-    email = os.getenv("EMAIL")
-    password = os.getenv("PASSWORD")
-    
-    print("EMAIL:", email)
-    print("PASSWORD length:", len(password))
-
-    server = smtplib.SMTP("smtp.office365.com", 587)
-    server.starttls()
-    server.login(email, password)
-    server.send_message(msg)
-    server.quit()
-
-    print("✅ Email sent successfully")
-
-
 # =========================
 # 1) FX FROM API (DYNAMIC)
 # =========================
@@ -627,17 +540,20 @@ print(loan_df)
 sgt = pytz.timezone("Asia/Singapore")
 now = datetime.now(sgt)
 
-
 # =========================
 # 4) BUILD NEW ROW
 # =========================
 new_row = {
     "Timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
-    "Malaysia_Overnight_Rate": overnight_rate
 }
 
+# FX rates
 for ccy in CURRENCIES:
     new_row[f"{BASE_CURRENCY}_{ccy}"] = current_rates[ccy]
+
+# Benchmark rates
+for key, value in benchmark_rates.items():
+    new_row[f"BM_{key}"] = value
 
 new_data = pd.DataFrame([new_row])
 
@@ -649,22 +565,26 @@ if os.path.exists(CSV_FILE):
     df = pd.read_csv(CSV_FILE)
     df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 else:
-    base_columns = ["Timestamp", "Malaysia_Overnight_Rate"] + [
+    base_columns = ["Timestamp"] + [
         f"{BASE_CURRENCY}_{ccy}" for ccy in CURRENCIES
+    ] + [
+        f"BM_{key}" for key in BENCHMARK_LABELS.keys()
     ]
     df = pd.DataFrame(columns=base_columns)
 
-# If you add a new currency later, make sure old CSV gains the new column
+# ensure FX columns exist
 for ccy in CURRENCIES:
     col = f"{BASE_CURRENCY}_{ccy}"
     if col not in df.columns:
         df[col] = pd.NA
 
-if "Malaysia_Overnight_Rate" not in df.columns:
-    df["Malaysia_Overnight_Rate"] = pd.NA
+# ensure Benchmark columns exist
+for key in BENCHMARK_LABELS.keys():
+    col = f"BM_{key}"
+    if col not in df.columns:
+        df[col] = pd.NA
 
 df = df.sort_values("Timestamp")
-
 
 # =========================
 # 6) CALCULATE CHANGES VS LAST RUN
@@ -672,9 +592,13 @@ df = df.sort_values("Timestamp")
 previous_rates = {}
 changes = {}
 
+previous_benchmark_rates = {}
+benchmark_changes = {}
+
 if not df.empty:
     last_row = df.iloc[-1]
 
+    # FX changes
     for ccy in CURRENCIES:
         col = f"{BASE_CURRENCY}_{ccy}"
         prev_value = last_row[col]
@@ -687,21 +611,30 @@ if not df.empty:
             previous_rates[ccy] = float(current_rates[ccy])
             changes[ccy] = 0.0
 
-    prev_overnight_raw = last_row["Malaysia_Overnight_Rate"]
-    if pd.notna(prev_overnight_raw):
-        yesterday_overnight_rate = float(prev_overnight_raw)
-        overnight_changed = float(yesterday_overnight_rate) != float(overnight_rate)
-    else:
-        yesterday_overnight_rate = overnight_rate
-        overnight_changed = False
+    # Benchmark changes
+    for key in BENCHMARK_LABELS.keys():
+        col = f"BM_{key}"
+        prev_raw = last_row[col] if col in last_row.index else pd.NA
+        curr_raw = benchmark_rates.get(key)
+
+        if pd.notna(prev_raw):
+            previous_benchmark_rates[key] = float(prev_raw)
+        else:
+            previous_benchmark_rates[key] = None
+
+        if curr_raw is None or pd.isna(curr_raw) or pd.isna(prev_raw):
+            benchmark_changes[key] = None
+        else:
+            benchmark_changes[key] = float(curr_raw) - float(prev_raw)
 
 else:
     for ccy in CURRENCIES:
         previous_rates[ccy] = float(current_rates[ccy])
         changes[ccy] = 0.0
 
-    yesterday_overnight_rate = overnight_rate
-    overnight_changed = False
+    for key in BENCHMARK_LABELS.keys():
+        previous_benchmark_rates[key] = None
+        benchmark_changes[key] = None
 
 
 # =========================
@@ -730,7 +663,22 @@ for ccy in CURRENCIES:
     print(f"{BASE_CURRENCY}/{ccy} Current:", current_rates[ccy])
     print(f"{BASE_CURRENCY}/{ccy} Change:", f"{arrow} {change_pct:.4f}%")
 
-print(f"Malaysia Overnight Rate changed today? {overnight_changed}")
+print("=== Benchmark Summary ===")
+for key, label in BENCHMARK_LABELS.items():
+    curr = benchmark_rates.get(key)
+    prev = previous_benchmark_rates.get(key)
+    diff = benchmark_changes.get(key)
+
+    curr_txt = "N/A" if curr is None or pd.isna(curr) else f"{float(curr):.5f}%"
+    prev_txt = "N/A" if prev is None or pd.isna(prev) else f"{float(prev):.5f}%"
+
+    if diff is None:
+        diff_txt = "N/A"
+    else:
+        direction = "▲" if diff > 0 else "▼" if diff < 0 else "➜"
+        diff_txt = f"{direction} {abs(diff)*100:.2f} bps"
+
+    print(f"{label} | Previous: {prev_txt} | Current: {curr_txt} | Change: {diff_txt}")
 
 
 # =========================
@@ -862,3 +810,17 @@ Auto-generated report</p>
     server.quit()
 
     print("✅ Email sent successfully")
+
+# =========================
+# 9) SEND EMAIL
+# =========================
+send_email(
+    current_rates=current_rates,
+    previous_rates=previous_rates,
+    changes=changes,
+    current_benchmark_rates=benchmark_rates,
+    previous_benchmark_rates=previous_benchmark_rates,
+    benchmark_changes=benchmark_changes,
+    currencies=CURRENCIES,
+    base_currency=BASE_CURRENCY
+)
