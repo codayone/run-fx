@@ -187,107 +187,49 @@ def fetch_klibor_3m():
 
 def fetch_sofr_3m_compounded():
     """
-    Fetch latest 90-day Average SOFR.
-
-    Order:
-    1) NY Fed official Excel export
-    2) NY Fed page table
-    3) FRED CSV
-
-    Returns:
-        float or None
+    Fetch latest 90-day Average SOFR
+    directly from NY Fed table
     """
+
     import requests
     import pandas as pd
-    from io import BytesIO, StringIO
+    from io import StringIO
 
-    session = requests.Session()
-    session.headers.update({
+    url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
+
+    headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*",
-        "Connection": "keep-alive",
-    })
+    }
 
-    # =========================
-    # 1) NY Fed official XLSX export
-    # =========================
     try:
-        url = "https://markets.newyorkfed.org/read?productCode=50&eventCodes=525&limit=25&startPosition=0&sort=postDt:-1&format=xlsx"
-        resp = session.get(url, timeout=30)
+        # ✅ Step 1: get raw HTML (more reliable than pd.read_html(url))
+        resp = requests.get(url, headers=headers, timeout=30)
         resp.raise_for_status()
 
-        xls = pd.ExcelFile(BytesIO(resp.content))
-        for sheet_name in xls.sheet_names:
-            df = pd.read_excel(xls, sheet_name=sheet_name)
+        html = resp.text
 
-            target_col = None
-            for c in df.columns:
-                c_upper = str(c).upper()
-                if "90" in c_upper and "AVERAGE" in c_upper:
-                    target_col = c
-                    break
+        # ✅ Step 2: let pandas parse the HTML string
+        tables = pd.read_html(StringIO(html))
 
-            if target_col is not None and not df.empty:
-                series = pd.to_numeric(df[target_col], errors="coerce").dropna()
-                if not series.empty:
-                    value = float(series.iloc[0])
-                    print(f"✅ SOFR from NY Fed XLSX: {value}")
+        # ✅ Step 3: find the correct table
+        for table in tables:
+
+            for col in table.columns:
+                col_upper = str(col).upper()
+
+                if "90" in col_upper and "AVERAGE" in col_upper:
+
+                    # ✅ first row = latest value
+                    value = float(table.iloc[0][col])
+
+                    print(f"✅ SOFR from NY Fed (90D): {value}")
                     return value
 
-        print("⚠️ NY Fed XLSX did not return usable 90-day SOFR")
-
-    except Exception as e:
-        print(f"⚠️ NY Fed XLSX failed: {e}")
-
-    # =========================
-    # 2) NY Fed official page table
-    # =========================
-    try:
-        url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
-        tables = pd.read_html(url)
-
-        for table in tables:
-            target_col = None
-            for c in table.columns:
-                c_upper = str(c).upper()
-                if "90" in c_upper and "AVERAGE" in c_upper:
-                    target_col = c
-                    break
-
-            if target_col is not None and not table.empty:
-                value = float(table.iloc[0][target_col])
-                print(f"✅ SOFR from NY Fed page: {value}")
-                return value
-
-        print("⚠️ NY Fed page had no usable 90-day SOFR table")
-
-    except Exception as e:
-        print(f"⚠️ NY Fed page failed: {e}")
-
-    # =========================
-    # 3) FRED CSV fallback
-    # =========================
-    try:
-        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR90DAYAVG"
-        resp = session.get(url, timeout=30)
-        resp.raise_for_status()
-
-        df = pd.read_csv(StringIO(resp.text))
-        value_col = [c for c in df.columns if str(c).upper() != "OBSERVATION_DATE"][0]
-
-        df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
-        df = df.dropna()
-
-        if not df.empty:
-            value = float(df.iloc[-1][value_col])
-            print(f"✅ SOFR from FRED: {value}")
-            return value
-
-        print("⚠️ FRED returned no usable SOFR data")
+        print("⚠️ SOFR table found but no 90-day column detected")
         return None
 
     except Exception as e:
-        print(f"⚠️ FRED failed: {e}")
+        print(f"⚠️ SOFR NY Fed parsing failed: {e}")
         return None
 
 def fetch_hibor_3m():
