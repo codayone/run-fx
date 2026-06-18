@@ -1,22 +1,12 @@
-# FX & Overnight Rate Tracker
+# 📊 FX & Benchmark Rate Tracker
 
-This project automatically tracks:
-
-- USD to selected currencies (via API)
-- Malaysia Overnight Rate (via BNM)
-- Daily changes in rates
-
-It also:
-- Stores historical data in CSV
-- Sends automated email alerts
-- Runs on GitHub Actions (scheduled)
+This project automates the daily tracking of FX rates and key benchmark interest rates for treasury monitoring.
 
 ---
 
-## 🔧 Configuration
+## 🌍 FX Rates
 
-Edit this in the script:
-
+- Retrieves USD exchange rates via API (Frankfurter)
+- Tracks selected currencies:
 ```python
-CURRENCIES = ["SGD", "MYR"]
-``
+CURRENCIES = ["SGD", "MYR", "THB", "JPY", "EUR", "HKD", "IDR"]
