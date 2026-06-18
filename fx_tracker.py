@@ -186,50 +186,40 @@ def fetch_klibor_3m():
     return float(val_3m)
 
 def fetch_sofr_3m_compounded():
-    """
-    Fetch latest 90-day Average SOFR
-    directly from NY Fed table
-    """
-
     import requests
     import pandas as pd
-    from io import StringIO
+    from io import BytesIO
 
-    url = "https://www.newyorkfed.org/markets/reference-rates/sofr-averages-and-index"
+    url = "https://markets.newyorkfed.org/read?productCode=50&eventCodes=525&limit=25&startPosition=0&sort=postDt:-1&format=xlsx"
 
     headers = {
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": "Mozilla/5.0"
     }
 
     try:
-        # ✅ Step 1: get raw HTML (more reliable than pd.read_html(url))
         resp = requests.get(url, headers=headers, timeout=30)
         resp.raise_for_status()
 
-        html = resp.text
+        df = pd.read_excel(BytesIO(resp.content))
 
-        # ✅ Step 2: let pandas parse the HTML string
-        tables = pd.read_html(StringIO(html))
+        # find 90-day column
+        col = None
+        for c in df.columns:
+            if "90" in str(c).upper():
+                col = c
+                break
 
-        # ✅ Step 3: find the correct table
-        for table in tables:
+        if col is None:
+            print("⚠️ 90-day column not found")
+            return None
 
-            for col in table.columns:
-                col_upper = str(col).upper()
+        value = float(df.iloc[0][col])
 
-                if "90" in col_upper and "AVERAGE" in col_upper:
-
-                    # ✅ first row = latest value
-                    value = float(table.iloc[0][col])
-
-                    print(f"✅ SOFR from NY Fed (90D): {value}")
-                    return value
-
-        print("⚠️ SOFR table found but no 90-day column detected")
-        return None
+        print(f"✅ SOFR from NY Fed XLSX: {value}")
+        return value
 
     except Exception as e:
-        print(f"⚠️ SOFR NY Fed parsing failed: {e}")
+        print(f"⚠️ SOFR XLSX failed: {e}")
         return None
 
 def fetch_hibor_3m():
@@ -360,109 +350,49 @@ def fetch_tibor_3m():
 
 def fetch_indonia_3m_compounded():
     """
-    Fetch latest 3M / 90-day Compounded INDONIA from official BI pages.
-
-    Tries:
-    1) Indonesian historical page
-    2) English historical page
-    3) Older BI explanatory page
-
-    Returns:
-        float or None
+    Fetch latest 3M / 90-day Compounded INDONIA
+    using the only reliable BI source.
     """
+
     import requests
     import pandas as pd
-    import re
-    import time
     from io import StringIO
 
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-    })
+    url = "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx"
 
-    urls = [
-        "https://www.bi.go.id/id/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
-        "https://www.bi.go.id/en/statistik/indikator/Historis-Compounded-IndONIA-Index.aspx",
-        "https://www.bi.go.id/en/fungsi-utama/moneter/indonia-jibor/Default_Old.aspx",
-    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
 
-    def extract_from_table(df):
-        # normalize headers
-        norm_cols = {str(c).strip().upper(): c for c in df.columns}
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        resp.raise_for_status()
 
-        # prefer explicit 3M / 3 BULAN / 90 DAY columns
-        preferred = []
-        for c in df.columns:
-            c_upper = str(c).upper()
-            if (
-                "3M" in c_upper or
-                "3 M" in c_upper or
-                "3 BULAN" in c_upper or
-                "90 DAY" in c_upper or
-                "90-DAY" in c_upper or
-                "90 HARI" in c_upper
-            ):
-                preferred.append(c)
+        tables = pd.read_html(StringIO(resp.text))
 
-        for col in preferred:
-            vals = pd.to_numeric(df[col], errors="coerce").dropna()
-            if not vals.empty:
-                return float(vals.iloc[0])
+        for table in tables:
+            for col in table.columns:
+                col_upper = str(col).upper()
 
-        return None
+                if (
+                    "3M" in col_upper
+                    or "3 M" in col_upper
+                    or "3 BULAN" in col_upper
+                    or "90" in col_upper
+                ):
+                    values = pd.to_numeric(table[col], errors="coerce").dropna()
 
-    for url in urls:
-        for attempt in range(3):
-            try:
-                resp = session.get(url, timeout=45, allow_redirects=True)
-                resp.raise_for_status()
-
-                html = resp.text
-
-                # 1) table parsing
-                try:
-                    tables = pd.read_html(StringIO(html))
-                    for table in tables:
-                        value = extract_from_table(table)
-                        if value is not None:
-                            print(f"✅ INDONIA from BI table: {value} | source={url}")
-                            return value
-                except Exception:
-                    pass
-
-                # 2) text parsing
-                text = re.sub(r"<[^>]+>", " ", html)
-                text = re.sub(r"\s+", " ", text).strip()
-
-                patterns = [
-                    r"(?:3M|3\s*M|3\s*MONTH|3\s*BULAN)[^\d]{0,40}(\d+\.\d+)",
-                    r"(?:90\s*DAY|90-DAY|90\s*HARI)[^\d]{0,40}(\d+\.\d+)",
-                ]
-
-                for pattern in patterns:
-                    m = re.search(pattern, text, flags=re.IGNORECASE)
-                    if m:
-                        value = float(m.group(1))
-                        print(f"✅ INDONIA from BI text: {value} | source={url}")
+                    if not values.empty:
+                        value = float(values.iloc[0])
+                        print(f"✅ INDONIA (BI old page): {value}")
                         return value
 
-                # if page loads but no value
-                print(f"⚠️ INDONIA page loaded but no usable 3M/90D value found: {url}")
-                break
+        print("⚠️ INDONIA column not found")
+        return None
 
-            except Exception as e:
-                print(f"⚠️ INDONIA attempt {attempt+1}/3 failed: {url} | {e}")
-                time.sleep(2)
-
-    print("⚠️ Could not fetch 3M / 90-day Compounded INDONIA from official BI pages")
-    return None
+    except Exception as e:
+        print(f"⚠️ INDONIA failed: {e}")
+        return None
 
 def fetch_benchmark_rates():
     rates = {}
