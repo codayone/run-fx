@@ -687,26 +687,48 @@ def send_email(current_rates, previous_rates, changes,
                current_benchmark_rates, previous_benchmark_rates, benchmark_changes,
                currencies, base_currency):
 
-    fx_section = ""
-
+    fx_rows = ""
+    
     for ccy in currencies:
         curr = float(current_rates[ccy])
         prev = float(previous_rates.get(ccy, curr))
-        change = float(changes.get(ccy, 0))
-
+        change = float(changes.get(ccy, 0)) * 100
+    
         if change > 0:
             direction = "↑"
         elif change < 0:
             direction = "↓"
         else:
             direction = "-"
-
-        if abs(change) > FX_ALERT_THRESHOLD:
-            fx_status = "🚨 ALERT: Significant FX movement (>0.5%)"
+    
+        if abs(change) > FX_ALERT_THRESHOLD * 100:
+            status = "🚨"
         else:
-            fx_status = "✅ Normal FX movement"
+            status = "✅"
+    
+        fx_rows += f"""
+        <tr>
+            <td>{base_currency}/{ccy}</td>
+            <td>{curr:.4f}</td>
+            <td>{prev:.4f}</td>
+            <td>{direction} {change:.4f}%</td>
+            <td>{status}</td>
+        </tr>
+        """
+    
+    fx_section = f"""
+    <table border="1" cellpadding="5" cellspacing="0">
+    <tr>
+        <th>Pair</th>
+        <th>Today</th>
+        <th>Yesterday</th>
+        <th>Change</th>
+        <th>Status</th>
+    </tr>
+    {fx_rows}
+    </table>
+    """
 
-        fx_section += f"""
         <p><b>{base_currency}/{ccy}</b></p>
         <p>
         Today: <b>{curr:.4f}</b><br>
