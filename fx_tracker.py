@@ -47,7 +47,7 @@ for item in LOAN_BENCHMARKS:
         f'{item["currency"]} - {item["benchmark"]}'
     )
 
-EMAIL_TO = "tangsuancoco.tan@dayonedc.com"
+EMAIL_TO = "yingkin.wong@dayonedc.com"
 EMAIL_FROM_DISPLAY = "FX Bot <tangsuancoco.tan@dayonedc.com>"
 CSV_FILE = "market_data.csv"
 
